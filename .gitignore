@@ -4,3 +4,4 @@ cache/
 data/output.csv
 data/input.csv
 .DS_Store
+dist/

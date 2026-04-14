@@ -1,12 +1,13 @@
 import { deriveDomain, nowIso } from './util.js';
+import type { InputRow, OutputRow } from './types.js';
 
-export async function processCompany(input) {
+export async function processCompany(input: InputRow): Promise<OutputRow> {
   const companyName = input['Company Name'];
   const website = input['Website'];
-  const linkedinUrl = input['LinkedIn URL'];
+  // const linkedinUrl = input['LinkedIn URL'];
   const domain = deriveDomain(website);
 
-  // TODO: wire up the real pipeline once you share per-API details.
+  // TODO: wire up the real pipeline once per-API details are provided.
   //   1. Apify — people LinkedIn URLs for this company
   //   2. Apify — fetch LinkedIn posts matching criteria
   //   3. Exa — multiple searches (cloud tool, comms tool, digital-native, etc.)

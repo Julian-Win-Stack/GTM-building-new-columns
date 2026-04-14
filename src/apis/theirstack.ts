@@ -7,7 +7,7 @@ const http = axios.create({
   timeout: 60_000,
 });
 
-export async function theirstackJobsSearch(payload) {
+export async function theirstackJobsSearch(payload: Record<string, unknown>): Promise<unknown> {
   // TODO: confirm endpoint path + payload shape when you share the spec
   const { data } = await http.post('/jobs/search', payload);
   return data;
