@@ -1,4 +1,4 @@
-import { deriveDomain, nowIso } from './util.js';
+import { deriveDomain } from './util.js';
 import { ENRICHERS, ENRICHABLE_COLUMN_LIST } from './enrichers/index.js';
 import type { EnrichableColumn, EnricherInput, EnrichmentResult, InputRow } from './types.js';
 
@@ -11,10 +11,6 @@ function toEnricherInput(row: InputRow): EnricherInput {
   };
 }
 
-/**
- * Run every enricher for a company and return a full EnrichmentResult.
- * If `onlyColumns` is provided, runs only those enrichers (others are left blank).
- */
 export async function runPipeline(
   row: InputRow,
   onlyColumns?: EnrichableColumn[]
@@ -30,29 +26,26 @@ export async function runPipeline(
   const result: EnrichmentResult = {
     'Company Name': row['Company Name'],
     'Domain': input.domain,
-    'Digital-native (Exa)': values['Digital-native (Exa)'] ?? '',
-    'Cloud Tool (Exa)': values['Cloud Tool (Exa)'] ?? '',
+    'Digital Native': values['Digital Native'] ?? '',
+    'Cloud Tool': values['Cloud Tool'] ?? '',
     'Observability Tool': values['Observability Tool'] ?? '',
-    'Communication Tool (Exa)': values['Communication Tool (Exa)'] ?? '',
+    'Communication Tool': values['Communication Tool'] ?? '',
     'Number of Users': values['Number of Users'] ?? '',
     'Competitor Tooling': values['Competitor Tooling'] ?? '',
+    'Number of Engineers': values['Number of Engineers'] ?? '',
+    'Number of SREs': values['Number of SREs'] ?? '',
     'Engineer Hiring': values['Engineer Hiring'] ?? '',
     'SRE Hiring': values['SRE Hiring'] ?? '',
-    'Recent Incidents': values['Recent Incidents'] ?? '',
+    'Customer complains on X': values['Customer complains on X'] ?? '',
+    'Recent incidents ( Official )': values['Recent incidents ( Official )'] ?? '',
     'Funding Growth': values['Funding Growth'] ?? '',
     'Revenue Growth': values['Revenue Growth'] ?? '',
-    'AI-forward Organization': values['AI-forward Organization'] ?? '',
-    'AI Reliability Keyword Signals': values['AI Reliability Keyword Signals'] ?? '',
-    'Status': 'done',
-    'Last Attempt': nowIso(),
-    'Error': '',
+    'AI adoption mindset': values['AI adoption mindset'] ?? '',
+    'AI SRE maturity': values['AI SRE maturity'] ?? '',
   };
   return result;
 }
 
-/**
- * Run a single enricher for a single column. Used by `enrich-column`.
- */
 export async function runSingleEnricher(row: InputRow, column: EnrichableColumn): Promise<string> {
   const input = toEnricherInput(row);
   return ENRICHERS[column](input);

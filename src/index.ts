@@ -40,6 +40,16 @@ program
     await enrichColumn(opts);
   });
 
+program
+  .command('attio-smoke')
+  .description('Smoke-test Attio: upsert one company (Name + Domain) into ranked_companies by domain')
+  .requiredOption('--domain <domain>', 'company domain, e.g. kobie.com')
+  .option('--csv <path>', 'path to input CSV (default: ./data/input.csv)')
+  .action(async (opts) => {
+    const { attioSmoke } = await import('./commands/attioSmoke.js');
+    await attioSmoke(opts);
+  });
+
 program.parseAsync(process.argv).catch((err) => {
   console.error('[fatal]', err instanceof Error ? err.message : err);
   process.exit(1);

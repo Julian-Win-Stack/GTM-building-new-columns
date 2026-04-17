@@ -4,43 +4,43 @@ export type InputRow = {
   'Company Linkedin Url': string;
 };
 
-export type Status = 'done' | 'error' | 'processing' | 'pending';
-
-// All columns we write to Attio, minus bookkeeping ones (Status / Last Attempt / Error).
 export type EnrichableColumn =
-  | 'Digital-native (Exa)'
-  | 'Cloud Tool (Exa)'
+  | 'Digital Native'
+  | 'Cloud Tool'
   | 'Observability Tool'
-  | 'Communication Tool (Exa)'
+  | 'Communication Tool'
   | 'Number of Users'
   | 'Competitor Tooling'
+  | 'Number of Engineers'
+  | 'Number of SREs'
   | 'Engineer Hiring'
   | 'SRE Hiring'
-  | 'Recent Incidents'
+  | 'Customer complains on X'
+  | 'Recent incidents ( Official )'
   | 'Funding Growth'
   | 'Revenue Growth'
-  | 'AI-forward Organization'
-  | 'AI Reliability Keyword Signals';
+  | 'AI adoption mindset'
+  | 'AI SRE maturity';
 
 export type EnrichmentResult = {
   'Company Name': string;
   'Domain': string;
-  'Digital-native (Exa)': string;
-  'Cloud Tool (Exa)': string;
+  'Digital Native': string;
+  'Cloud Tool': string;
   'Observability Tool': string;
-  'Communication Tool (Exa)': string;
+  'Communication Tool': string;
   'Number of Users': string;
   'Competitor Tooling': string;
+  'Number of Engineers': string;
+  'Number of SREs': string;
   'Engineer Hiring': string;
   'SRE Hiring': string;
-  'Recent Incidents': string;
+  'Customer complains on X': string;
+  'Recent incidents ( Official )': string;
   'Funding Growth': string;
   'Revenue Growth': string;
-  'AI-forward Organization': string;
-  'AI Reliability Keyword Signals': string;
-  'Status': Status;
-  'Last Attempt': string;
-  'Error': string;
+  'AI adoption mindset': string;
+  'AI SRE maturity': string;
 };
 
 export type EnricherInput = {
@@ -54,5 +54,5 @@ export type EnricherFn = (input: EnricherInput) => Promise<string>;
 
 export type AttioRecord = {
   id: string;
-  values: Partial<Record<EnrichableColumn | 'Company Name' | 'Domain' | 'Status' | 'Last Attempt' | 'Error', string>>;
+  values: Partial<Record<EnrichableColumn | 'Company Name' | 'Domain', string>>;
 };

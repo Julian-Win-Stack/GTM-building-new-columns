@@ -18,6 +18,7 @@ export const KEYS = {
   azureOpenAIBaseUrl: process.env.AZURE_OPENAI_BASE_URL ?? '',
   azureOpenAIDeployment: process.env.AZURE_OPENAI_DEPLOYMENT ?? '',
   attio: process.env.ATTIO_API_KEY ?? '',
+  attioObjectSlug: process.env.ATTIO_OBJECT_SLUG ?? 'ranked_companies',
 } as const;
 
 export const CONCURRENCY = Number(process.env.CONCURRENCY ?? 3);
@@ -25,17 +26,20 @@ export const CONCURRENCY = Number(process.env.CONCURRENCY ?? 3);
 export const INPUT_COLUMNS = ['Company Name', 'Website', 'Company Linkedin Url'] as const;
 
 export const ENRICHABLE_COLUMNS = [
-  'Digital-native (Exa)',
-  'Cloud Tool (Exa)',
+  'Digital Native',
+  'Cloud Tool',
   'Observability Tool',
-  'Communication Tool (Exa)',
+  'Communication Tool',
   'Number of Users',
   'Competitor Tooling',
+  'Number of Engineers',
+  'Number of SREs',
   'Engineer Hiring',
   'SRE Hiring',
-  'Recent Incidents',
+  'Customer complains on X',
+  'Recent incidents ( Official )',
   'Funding Growth',
   'Revenue Growth',
-  'AI-forward Organization',
-  'AI Reliability Keyword Signals',
+  'AI adoption mindset',
+  'AI SRE maturity',
 ] as const;
