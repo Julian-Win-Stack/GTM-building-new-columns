@@ -6,7 +6,23 @@ export type InputRow = {
 
 export type Status = 'done' | 'error' | 'processing' | 'pending';
 
-export type OutputRow = {
+// All columns we write to Attio, minus bookkeeping ones (Status / Last Attempt / Error).
+export type EnrichableColumn =
+  | 'Digital-native (Exa)'
+  | 'Cloud Tool (Exa)'
+  | 'Observability Tool'
+  | 'Communication Tool (Exa)'
+  | 'Number of Users'
+  | 'Competitor Tooling'
+  | 'Engineer Hiring'
+  | 'SRE Hiring'
+  | 'Recent Incidents'
+  | 'Funding Growth'
+  | 'Revenue Growth'
+  | 'AI-forward Organization'
+  | 'AI Reliability Keyword Signals';
+
+export type EnrichmentResult = {
   'Company Name': string;
   'Domain': string;
   'Digital-native (Exa)': string;
@@ -22,7 +38,21 @@ export type OutputRow = {
   'Revenue Growth': string;
   'AI-forward Organization': string;
   'AI Reliability Keyword Signals': string;
-  'Status': Status | '';
+  'Status': Status;
   'Last Attempt': string;
   'Error': string;
+};
+
+export type EnricherInput = {
+  companyName: string;
+  domain: string;
+  website: string;
+  linkedinUrl: string;
+};
+
+export type EnricherFn = (input: EnricherInput) => Promise<string>;
+
+export type AttioRecord = {
+  id: string;
+  values: Partial<Record<EnrichableColumn | 'Company Name' | 'Domain' | 'Status' | 'Last Attempt' | 'Error', string>>;
 };

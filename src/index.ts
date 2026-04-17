@@ -1,70 +1,46 @@
-import pLimit from 'p-limit';
-import { PATHS, CONCURRENCY } from './config.js';
-import { readCsv, ensureOutputCsv, loadProcessedKeys, appendRow, companyKey } from './csv.js';
-import { processCompany } from './pipeline.js';
-import { nowIso } from './util.js';
-import type { InputRow } from './types.js';
+import { Command } from 'commander';
+import { enrichAll } from './commands/enrichAll.js';
+import { enrichCompany } from './commands/enrichCompany.js';
+import { enrichColumn } from './commands/enrichColumn.js';
 
-type Args = { limit: number; retryErrors: boolean };
+const program = new Command();
 
-function parseArgs(argv: string[]): Args {
-  const args: Args = { limit: Infinity, retryErrors: false };
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--limit') args.limit = Number(argv[++i]);
-    else if (a === '--retry-errors') args.retryErrors = true;
-  }
-  return args;
-}
+program
+  .name('gtm-enrich')
+  .description('Enrich company data via Apify, Exa, TheirStack, Azure OpenAI → write to Attio');
 
-async function main(): Promise<void> {
-  const args = parseArgs(process.argv);
-  await ensureOutputCsv(PATHS.output);
+program
+  .command('enrich-all')
+  .description('Bulk enrich every company from the CSV into Attio (create missing, fill gaps on existing)')
+  .option('--csv <path>', 'path to input CSV (default: ./data/input.csv)')
+  .option('--limit <n>', 'process only the first N rows', (v) => parseInt(v, 10))
+  .option('--dry-run', 'show what would be created/updated without calling any APIs')
+  .action(async (opts) => {
+    await enrichAll(opts);
+  });
 
-  const input = await readCsv<InputRow>(PATHS.input);
-  const done = await loadProcessedKeys(PATHS.output, companyKey);
+program
+  .command('enrich-company')
+  .description('Enrich all columns for a single company (create if missing in Attio, update otherwise)')
+  .requiredOption('--domain <domain>', 'company domain, e.g. acme.com')
+  .option('--csv <path>', 'path to input CSV (default: ./data/input.csv)')
+  .option('--dry-run', 'show what would happen without calling any APIs')
+  .action(async (opts) => {
+    await enrichCompany(opts);
+  });
 
-  const pending = input
-    .filter((row) => !done.has(companyKey(row)))
-    .slice(0, Number.isFinite(args.limit) ? args.limit : input.length);
+program
+  .command('enrich-column')
+  .description('Overwrite a single column for a single company in Attio (company must already exist)')
+  .requiredOption('--column <column>', 'exact column name, e.g. "Cloud Tool (Exa)"')
+  .requiredOption('--domain <domain>', 'company domain, e.g. acme.com')
+  .option('--csv <path>', 'path to input CSV (default: ./data/input.csv)')
+  .option('--dry-run', 'show what would happen without calling any APIs')
+  .action(async (opts) => {
+    await enrichColumn(opts);
+  });
 
-  console.log(
-    `[start] total=${input.length} done=${done.size} pending=${pending.length} concurrency=${CONCURRENCY}`
-  );
-
-  const limit = pLimit(CONCURRENCY);
-  let processed = 0;
-  let failed = 0;
-
-  await Promise.all(
-    pending.map((row) =>
-      limit(async () => {
-        const label = row['Company Name'] || row['Website'] || '(unknown)';
-        try {
-          const out = await processCompany(row);
-          appendRow(PATHS.output, out);
-          processed++;
-          console.log(`[ok ${processed}/${pending.length}] ${label}`);
-        } catch (err) {
-          failed++;
-          const msg = err instanceof Error ? err.message : String(err);
-          appendRow(PATHS.output, {
-            'Company Name': row['Company Name'] ?? '',
-            'Domain': '',
-            'Status': 'error',
-            'Last Attempt': nowIso(),
-            'Error': msg,
-          });
-          console.error(`[fail] ${label}: ${msg}`);
-        }
-      })
-    )
-  );
-
-  console.log(`[done] processed=${processed} failed=${failed}`);
-}
-
-main().catch((err) => {
-  console.error('[fatal]', err);
+program.parseAsync(process.argv).catch((err) => {
+  console.error('[fatal]', err instanceof Error ? err.message : err);
   process.exit(1);
 });

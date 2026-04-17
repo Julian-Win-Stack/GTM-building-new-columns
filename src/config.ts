@@ -6,8 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 export const PATHS = {
-  input: path.join(ROOT, 'data', 'input.csv'),
-  output: path.join(ROOT, 'data', 'output.csv'),
+  defaultInputCsv: path.join(ROOT, 'data', 'input.csv'),
   cache: path.join(ROOT, 'cache'),
 } as const;
 
@@ -18,15 +17,14 @@ export const KEYS = {
   azureOpenAIKey: process.env.AZURE_OPENAI_API_KEY ?? '',
   azureOpenAIBaseUrl: process.env.AZURE_OPENAI_BASE_URL ?? '',
   azureOpenAIDeployment: process.env.AZURE_OPENAI_DEPLOYMENT ?? '',
+  attio: process.env.ATTIO_API_KEY ?? '',
 } as const;
 
 export const CONCURRENCY = Number(process.env.CONCURRENCY ?? 3);
 
 export const INPUT_COLUMNS = ['Company Name', 'Website', 'LinkedIn URL'] as const;
 
-export const OUTPUT_COLUMNS = [
-  'Company Name',
-  'Domain',
+export const ENRICHABLE_COLUMNS = [
   'Digital-native (Exa)',
   'Cloud Tool (Exa)',
   'Observability Tool',
@@ -40,7 +38,4 @@ export const OUTPUT_COLUMNS = [
   'Revenue Growth',
   'AI-forward Organization',
   'AI Reliability Keyword Signals',
-  'Status',
-  'Last Attempt',
-  'Error',
 ] as const;
