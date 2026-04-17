@@ -7,7 +7,7 @@ function toEnricherInput(row: InputRow): EnricherInput {
     companyName: row['Company Name'],
     domain: deriveDomain(row['Website']),
     website: row['Website'],
-    linkedinUrl: row['LinkedIn URL'],
+    linkedinUrl: row['Company Linkedin Url'],
   };
 }
 

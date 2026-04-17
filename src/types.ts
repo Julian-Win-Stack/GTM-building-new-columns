@@ -1,7 +1,7 @@
 export type InputRow = {
   'Company Name': string;
   'Website': string;
-  'LinkedIn URL': string;
+  'Company Linkedin Url': string;
 };
 
 export type Status = 'done' | 'error' | 'processing' | 'pending';

@@ -22,7 +22,7 @@ export const KEYS = {
 
 export const CONCURRENCY = Number(process.env.CONCURRENCY ?? 3);
 
-export const INPUT_COLUMNS = ['Company Name', 'Website', 'LinkedIn URL'] as const;
+export const INPUT_COLUMNS = ['Company Name', 'Website', 'Company Linkedin Url'] as const;
 
 export const ENRICHABLE_COLUMNS = [
   'Digital-native (Exa)',
