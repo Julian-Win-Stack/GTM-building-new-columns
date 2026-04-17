@@ -1,10 +1,8 @@
-import pLimit from 'p-limit';
-import { PATHS, CONCURRENCY } from '../config.js';
+import { PATHS } from '../config.js';
 import { readInputCsv } from '../csv.js';
-import { runPipeline } from '../pipeline.js';
-import { createCompany, findCompanyByDomain, findEmptyColumns, updateCompany } from '../apis/attio.js';
-import { deriveDomain, nowIso } from '../util.js';
-import type { EnrichableColumn, InputRow } from '../types.js';
+import { digitalNativeExaSearch } from '../apis/exa.js';
+import { deriveDomain } from '../util.js';
+import type { InputRow } from '../types.js';
 
 export type EnrichAllOptions = {
   csv?: string;
@@ -17,78 +15,46 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const rows = await readInputCsv(csvPath);
   const subset = opts.limit ? rows.slice(0, opts.limit) : rows;
 
+  type Usable = { row: InputRow; domain: string; label: string };
+  const usable: Usable[] = [];
+  let skippedBadDomain = 0;
+
+  for (const row of subset) {
+    const label = row['Company Name'] || row['Website'] || '(unknown)';
+    const domain = deriveDomain(row['Website']);
+    if (!domain) {
+      skippedBadDomain++;
+      console.error(`[fail] ${label}: no parseable domain in Website — skipping`);
+      continue;
+    }
+    usable.push({ row, domain, label });
+  }
+
+  const batches: Usable[][] = [];
+  for (let i = 0; i < usable.length; i += 2) batches.push(usable.slice(i, i + 2));
+
   console.log(
-    `[enrich-all] csv=${csvPath} rows=${subset.length}/${rows.length} concurrency=${CONCURRENCY} dryRun=${!!opts.dryRun}`
+    `[enrich-all] csv=${csvPath} rows=${subset.length} usable=${usable.length} batches=${batches.length} badDomains=${skippedBadDomain} dryRun=${!!opts.dryRun}`
   );
 
-  const limit = pLimit(CONCURRENCY);
-  let created = 0;
-  let updated = 0;
-  let skipped = 0;
-  let failed = 0;
+  for (const batch of batches) {
+    const domains = batch.map((b) => b.domain);
+    const labels = batch.map((b) => b.label).join(' + ');
 
-  await Promise.all(
-    subset.map((row) =>
-      limit(async () => {
-        const label = row['Company Name'] || row['Website'] || '(unknown)';
-        const domain = deriveDomain(row['Website']);
-        if (!domain) {
-          failed++;
-          console.error(`[fail] ${label}: no parseable domain in Website column — skipping`);
-          return;
-        }
-        try {
-          const existing = await findCompanyByDomain(domain);
+    if (opts.dryRun) {
+      console.log(`[dry] digital-native Exa: ${domains.join(', ')}  (${labels})`);
+      continue;
+    }
 
-          if (existing) {
-            const emptyCols = findEmptyColumns(existing) as EnrichableColumn[];
-            if (emptyCols.length === 0) {
-              skipped++;
-              console.log(`[skip] ${label} — already fully enriched`);
-              return;
-            }
-            if (opts.dryRun) {
-              console.log(`[dry] UPDATE ${label} missing=${emptyCols.length}`);
-              return;
-            }
-            const result = await runPipeline(row, emptyCols);
-            await updateCompany(existing.id, result);
-            updated++;
-            console.log(`[update ${updated}] ${label}`);
-          } else {
-            if (opts.dryRun) {
-              console.log(`[dry] CREATE ${label}`);
-              return;
-            }
-            const result = await runPipeline(row);
-            await createCompany(result);
-            created++;
-            console.log(`[create ${created}] ${label}`);
-          }
-        } catch (err) {
-          failed++;
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[fail] ${label}: ${msg}`);
-          if (!opts.dryRun) {
-            try {
-              const existing = await findCompanyByDomain(domain);
-              const errPayload = {
-                'Company Name': row['Company Name'],
-                'Domain': domain,
-                'Status': 'error' as const,
-                'Last Attempt': nowIso(),
-                'Error': msg,
-              };
-              if (existing) await updateCompany(existing.id, errPayload);
-              else await createCompany(errPayload);
-            } catch {
-              /* swallow — we already logged the primary failure */
-            }
-          }
-        }
-      })
-    )
-  );
+    console.log(`\n=== [digital-native] batch: ${domains.join(', ')}  (${labels}) ===`);
+    try {
+      const response = await digitalNativeExaSearch(domains);
+      console.log(JSON.stringify(response, null, 2));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[fail] digital-native batch ${domains.join(', ')}: ${msg}`);
+    }
+  }
 
-  console.log(`[done] created=${created} updated=${updated} skipped=${skipped} failed=${failed}`);
+  console.log(`\n[done] batches=${batches.length} badDomains=${skippedBadDomain}`);
 }
