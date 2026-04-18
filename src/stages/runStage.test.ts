@@ -100,4 +100,46 @@ describe('runStage', () => {
     expect(out[0]!.error).toBe('first-fail');
     expect(out[2]!.data).toBe('ok');
   });
+
+  it('calls afterBatch once per batch with that batch results', async () => {
+    const companies = makeCompanies(4);
+    const call = vi.fn().mockResolvedValue('raw');
+    const parse = vi.fn().mockImplementation((_raw: string, batch: StageCompany[]) =>
+      batch.map<StageResult<string>>((c) => ({ company: c, data: c.domain }))
+    );
+    const afterBatch = vi.fn().mockResolvedValue(undefined);
+
+    await runStage({ name: 's', companies, batchSize: 2, call, parse, afterBatch });
+
+    expect(afterBatch).toHaveBeenCalledTimes(2);
+    expect(afterBatch.mock.calls[0]![0]).toHaveLength(2);
+    expect(afterBatch.mock.calls[1]![0]).toHaveLength(2);
+  });
+
+  it('calls afterBatch with error results when call throws', async () => {
+    const companies = makeCompanies(2);
+    const call = vi.fn().mockRejectedValue(new Error('API down'));
+    const parse = vi.fn();
+    const afterBatch = vi.fn().mockResolvedValue(undefined);
+
+    await runStage({ name: 's', companies, batchSize: 2, call, parse, afterBatch });
+
+    expect(afterBatch).toHaveBeenCalledTimes(1);
+    const results: StageResult<string>[] = afterBatch.mock.calls[0]![0];
+    expect(results).toHaveLength(2);
+    expect(results[0]?.error).toBe('API down');
+    expect(results[1]?.error).toBe('API down');
+  });
+
+  it('works without afterBatch (backward compat)', async () => {
+    const companies = makeCompanies(2);
+    const call = vi.fn().mockResolvedValue('raw');
+    const parse = vi.fn().mockImplementation((_raw: string, batch: StageCompany[]) =>
+      batch.map<StageResult<string>>((c) => ({ company: c, data: 'ok' }))
+    );
+
+    const results = await runStage({ name: 's', companies, batchSize: 2, call, parse });
+    expect(results).toHaveLength(2);
+    expect(results[0]?.error).toBeUndefined();
+  });
 });

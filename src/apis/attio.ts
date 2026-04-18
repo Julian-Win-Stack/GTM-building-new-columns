@@ -2,7 +2,7 @@ import axios from 'axios';
 import { KEYS } from '../config.js';
 import type { AttioRecord, EnrichmentResult } from '../types.js';
 
-const FIELD_SLUGS: Record<string, string> = {
+export const FIELD_SLUGS: Record<string, string> = {
   'Company Name': 'company_name',
   'Domain': 'domain',
   'Digital Native': 'digital_native',
@@ -37,6 +37,51 @@ function toAttioValues(data: Partial<EnrichmentResult>): Record<string, unknown>
     values[slug] = val;
   }
   return values;
+}
+
+type RawAttioField = Array<{ value?: string; domain_name?: string }>;
+type RawAttioRecord = { id: { record_id: string } | string; values: Record<string, RawAttioField> };
+
+function extractDomain(rec: RawAttioRecord): string {
+  const arr = rec.values?.['domain'];
+  return arr?.[0]?.domain_name ?? arr?.[0]?.value ?? '';
+}
+
+function extractValues(rec: RawAttioRecord): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [slug, arr] of Object.entries(rec.values ?? {})) {
+    const val = arr?.[0]?.value ?? arr?.[0]?.domain_name ?? '';
+    if (val) out[slug] = val;
+  }
+  return out;
+}
+
+export async function fetchAllRecords(
+  domains: string[],
+  client: { post: typeof http.post } = http
+): Promise<Map<string, Record<string, string>>> {
+  const domainSet = new Set(domains);
+  const map = new Map<string, Record<string, string>>();
+  let offset = 0;
+  const limit = 500;
+
+  while (true) {
+    const res = await client.post(`/objects/${KEYS.attioObjectSlug}/records/query`, { limit, offset });
+    const records = (res.data?.data ?? []) as RawAttioRecord[];
+    if (records.length === 0) break;
+
+    for (const rec of records) {
+      const domain = extractDomain(rec);
+      if (domain && domainSet.has(domain)) {
+        map.set(domain, extractValues(rec));
+      }
+    }
+
+    if (records.length < limit) break;
+    offset += limit;
+  }
+
+  return map;
 }
 
 export async function findCompanyByDomain(domain: string): Promise<AttioRecord | null> {

@@ -6,6 +6,7 @@ type RunStageOptions<TRaw, TData> = {
   batchSize: number;
   call: (domains: string[]) => Promise<TRaw>;
   parse: (raw: TRaw, batch: StageCompany[]) => StageResult<TData>[];
+  afterBatch?: (batchResults: StageResult<TData>[]) => Promise<void>;
 };
 
 export async function runStage<TRaw, TData>(
@@ -23,15 +24,17 @@ export async function runStage<TRaw, TData>(
   for (const batch of batches) {
     const domains = batch.map((c) => c.domain);
     console.log(`[${name}] batch: ${domains.join(', ')}`);
+    let batchResults: StageResult<TData>[];
     try {
       const raw = await call(domains);
-      const results = parse(raw, batch);
-      all.push(...results);
+      batchResults = parse(raw, batch);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[${name}] batch failed (${domains.join(', ')}): ${msg}`);
-      for (const company of batch) all.push({ company, error: msg });
+      batchResults = batch.map((company) => ({ company, error: msg }));
     }
+    all.push(...batchResults);
+    await opts.afterBatch?.(batchResults);
   }
   return all;
 }

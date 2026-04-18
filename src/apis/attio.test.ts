@@ -14,7 +14,7 @@ vi.mock('axios', () => ({
   },
 }));
 
-const { findCompanyByDomain, createCompany, updateCompany, upsertCompanyByDomain } =
+const { findCompanyByDomain, createCompany, updateCompany, upsertCompanyByDomain, fetchAllRecords } =
   await import('./attio.js');
 
 beforeEach(() => {
@@ -125,6 +125,81 @@ describe('updateCompany', () => {
       expect.stringMatching(/\/records\/rec_7$/),
       { data: { values: { digital_native: 'foo' } } }
     );
+  });
+});
+
+describe('fetchAllRecords', () => {
+  function makeRecord(domain: string, extraValues: Record<string, Array<{ value?: string; domain_name?: string }>> = {}) {
+    return {
+      id: { record_id: `rec_${domain}` },
+      values: {
+        domain: [{ domain_name: domain }],
+        ...extraValues,
+      },
+    };
+  }
+
+  it('returns a Map keyed by domain for matching input domains', async () => {
+    httpMock.post.mockResolvedValue({
+      data: { data: [makeRecord('acme.com'), makeRecord('stripe.com')] },
+    });
+
+    const map = await fetchAllRecords(['acme.com', 'stripe.com'], httpMock);
+
+    expect(map.size).toBe(2);
+    expect(map.has('acme.com')).toBe(true);
+    expect(map.has('stripe.com')).toBe(true);
+  });
+
+  it('excludes records whose domain is not in the input list', async () => {
+    httpMock.post.mockResolvedValue({
+      data: { data: [makeRecord('acme.com'), makeRecord('other.com')] },
+    });
+
+    const map = await fetchAllRecords(['acme.com'], httpMock);
+
+    expect(map.size).toBe(1);
+    expect(map.has('other.com')).toBe(false);
+  });
+
+  it('extracts non-empty field values as slug-keyed strings', async () => {
+    httpMock.post.mockResolvedValue({
+      data: {
+        data: [
+          makeRecord('acme.com', {
+            digital_native: [{ value: 'Digital-native B2C' }],
+            cloud_tool: [{ value: '' }],
+          }),
+        ],
+      },
+    });
+
+    const map = await fetchAllRecords(['acme.com'], httpMock);
+    const values = map.get('acme.com')!;
+
+    expect(values['digital_native']).toBe('Digital-native B2C');
+    expect(values['cloud_tool']).toBeUndefined();
+  });
+
+  it('paginates when a full page is returned and stops when partial', async () => {
+    const page1 = Array.from({ length: 500 }, (_, i) => makeRecord(`co${i}.com`));
+    const page2 = [makeRecord('last.com')];
+    httpMock.post
+      .mockResolvedValueOnce({ data: { data: page1 } })
+      .mockResolvedValueOnce({ data: { data: page2 } });
+
+    const domains = [...page1.map((_, i) => `co${i}.com`), 'last.com'];
+    const map = await fetchAllRecords(domains, httpMock);
+
+    expect(httpMock.post).toHaveBeenCalledTimes(2);
+    expect(map.has('last.com')).toBe(true);
+    expect(map.size).toBe(501);
+  });
+
+  it('returns an empty map when Attio returns no records', async () => {
+    httpMock.post.mockResolvedValue({ data: { data: [] } });
+    const map = await fetchAllRecords(['acme.com'], httpMock);
+    expect(map.size).toBe(0);
   });
 });
 
