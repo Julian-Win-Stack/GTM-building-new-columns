@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import axios from 'axios';
 import { enrichAll } from './commands/enrichAll.js';
 import { enrichCompany } from './commands/enrichCompany.js';
 import { enrichColumn } from './commands/enrichColumn.js';
@@ -51,6 +52,16 @@ program
   });
 
 program.parseAsync(process.argv).catch((err) => {
-  console.error('[fatal]', err instanceof Error ? err.message : err);
+  if (axios.isAxiosError(err)) {
+    const method = err.config?.method?.toUpperCase();
+    const url = err.config?.url;
+    const status = err.response?.status;
+    const body = err.response?.data;
+    console.error(`[fatal] ${method} ${url} → ${status}`);
+    console.error('[fatal] response body:', typeof body === 'string' ? body : JSON.stringify(body, null, 2));
+    console.error('[fatal] request body:', err.config?.data);
+  } else {
+    console.error('[fatal]', err instanceof Error ? err.stack ?? err.message : err);
+  }
   process.exit(1);
 });

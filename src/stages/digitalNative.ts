@@ -14,41 +14,69 @@ export type DigitalNativeData = {
   reason: string;
 };
 
+const VALID_CATEGORIES: ReadonlySet<string> = new Set([
+  'Digital-native B2C',
+  'Digital-native B2B',
+  'Digital-native B2B2C',
+  'Digital-native B2C2B',
+  'NOT Digital-native',
+]);
+
+function normalizeDomain(raw: string): string {
+  return raw.trim().toLowerCase().replace(/^www\./, '');
+}
+
+function extractParsedObject(raw: ExaSearchResponse): Record<string, unknown> | null {
+  const content = raw.output?.content;
+  if (content && typeof content === 'object') return content as Record<string, unknown>;
+  return null;
+}
+
 export function parseDigitalNativeResponse(
   raw: ExaSearchResponse,
   companies: StageCompany[]
 ): StageResult<DigitalNativeData>[] {
-  const blocks = raw.output.content.split(/\n[ \t]*\n+/);
+  const parsedMap = new Map<string, DigitalNativeData>();
+  const payload = extractParsedObject(raw);
+  const items = Array.isArray(payload?.['companies']) ? (payload!['companies'] as unknown[]) : [];
 
-  const parsed = new Map<string, DigitalNativeData>();
-  for (const block of blocks) {
-    const lines = block.trim().split('\n');
-    if (lines.length < 4) continue;
-    const domain = lines[0]?.trim().toLowerCase().replace(/^www\./, '') ?? '';
-    const categoryMatch = block.match(/^CATEGORY:\s*(.+)$/m);
-    const confidenceMatch = block.match(/^CONFIDENCE:\s*(.+)$/m);
-    const reasonMatch = block.match(/^REASON:\s*([\s\S]+?)(?=\n[A-Z]+:|$)/m);
-    const category = categoryMatch?.[1]?.trim();
-    const confidence = confidenceMatch?.[1]?.trim();
-    const reason = reasonMatch?.[1]?.trim();
-    if (!category || !confidence || !reason || !domain) continue;
-    parsed.set(domain, {
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const domainRaw = typeof rec['domain'] === 'string' ? rec['domain'] : '';
+    const category = typeof rec['category'] === 'string' ? rec['category'] : '';
+    const confidence = typeof rec['confidence'] === 'string' ? rec['confidence'] : '';
+    const reason = typeof rec['reason'] === 'string' ? rec['reason'] : '';
+    if (!domainRaw || !category || !confidence || !reason) continue;
+    if (!VALID_CATEGORIES.has(category)) continue;
+    parsedMap.set(normalizeDomain(domainRaw), {
       category: category as DigitalNativeCategory,
       confidence,
       reason,
     });
   }
 
-  return companies.map((company) => {
-    const data = parsed.get(company.domain);
+  const results = companies.map((company) => {
+    const data = parsedMap.get(company.domain);
     if (!data) return { company, error: 'no output from Exa' };
     return { company, data };
   });
+
+  const missing = results.filter((r) => r.error !== undefined).map((r) => r.company.domain);
+  if (missing.length > 0) {
+    console.log(
+      `[digitalNative] parse miss — expected=[${companies.map((c) => c.domain).join(', ')}] parsed=[${[...parsedMap.keys()].join(', ')}] missing=[${missing.join(', ')}]`
+    );
+    console.log('[digitalNative] raw Exa output.content:');
+    console.log(typeof raw.output?.content === 'string' ? raw.output.content : JSON.stringify(raw.output?.content, null, 2));
+  }
+
+  return results;
 }
 
 export const digitalNativeGate: GateRule<DigitalNativeData> = (d) =>
   d.category !== 'NOT Digital-native' && d.category !== 'Digital-native B2B';
 
 export function formatDigitalNativeForAttio(d: DigitalNativeData): string {
-  return `${d.category}\nConfidence: ${d.confidence}\nReasoning: ${d.reason}`;
+  return `${d.category}\n\nConfidence: ${d.confidence}\n\nReasoning: ${d.reason}`;
 }

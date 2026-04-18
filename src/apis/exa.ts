@@ -1,6 +1,17 @@
 import Exa from 'exa-js';
 import { KEYS } from '../config.js';
 
+export type DigitalNativeExaItem = {
+  domain: string;
+  category: string;
+  confidence: string;
+  reason: string;
+};
+
+export type DigitalNativeExaPayload = {
+  companies: DigitalNativeExaItem[];
+};
+
 export type ExaSearchResponse = {
   results: Array<{
     id: string;
@@ -15,7 +26,7 @@ export type ExaSearchResponse = {
   }>;
   searchTime: number;
   output: {
-    content: string;
+    content: string | Record<string, unknown>;
     grounding: Array<{
       field: string;
       citations: Array<{ url: string; title: string }>;
@@ -72,22 +83,43 @@ RESEARCH STEPS:
 5. Ask: Is the vendor's brand or interface visible to end consumers? (Supporting signal only.)
 6. Ask: Did consumer adoption precede business monetization?
 7. Apply Rules 1 → 2 → 2b → 3 → 4 → Tiebreaker in order and select ONE category.
-8. Output your classification in this exact format:
 
-   CATEGORY: [chosen category]
-   CONFIDENCE: [High / Medium / Low]
-   REASON: [2–3 sentences referencing specific product behavior — who uses it daily, what the platform outputs, and whether consumers are the core value driver. Do not rely solely on company descriptions or marketing language.]
+For each input company domain, return one object in the "companies" array with:
+   - domain: the exact domain provided (lowercase, no www.)
+   - category: one of the five categories above
+   - confidence: High | Medium | Low
+   - reason: 2–3 sentences referencing specific product behavior — who uses it daily, what the platform outputs, and whether consumers are the core value driver. Do not rely solely on company descriptions or marketing language.
 
-Input:
-company domain`;
+Always include every requested domain in the companies array, even if confidence is Low.`;
 
-const OUTPUT_SCHEMA_DESC =
-  'For each company domain provided, output your answer in this exact format:\n\n' +
-  '[domain]\n' +
-  'CATEGORY: [one of: Digital-native B2C | Digital-native B2B | Digital-native B2B2C | Digital-native B2C2B | NOT Digital-native]\n' +
-  'CONFIDENCE: [High | Medium | Low]\n' +
-  'REASON: [2–3 sentence justification referencing specific product behavior, not just company description]\n\n' +
-  'Repeat this block for each company.';
+const DIGITAL_NATIVE_OBJECT_SCHEMA = {
+  type: 'object',
+  properties: {
+    companies: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string' },
+          category: {
+            type: 'string',
+            enum: [
+              'Digital-native B2C',
+              'Digital-native B2B',
+              'Digital-native B2B2C',
+              'Digital-native B2C2B',
+              'NOT Digital-native',
+            ],
+          },
+          confidence: { type: 'string', enum: ['High', 'Medium', 'Low'] },
+          reason: { type: 'string' },
+        },
+        required: ['domain', 'category', 'confidence', 'reason'],
+      },
+    },
+  },
+  required: ['companies'],
+} as const;
 
 export async function digitalNativeExaSearch(domains: string[]): Promise<ExaSearchResponse> {
   if (domains.length === 0) throw new Error('digitalNativeExaSearch: need at least 1 domain');
@@ -99,10 +131,9 @@ export async function digitalNativeExaSearch(domains: string[]): Promise<ExaSear
 
   return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
     numResults: 10,
-    outputSchema: { type: 'text', description: OUTPUT_SCHEMA_DESC },
+    outputSchema: DIGITAL_NATIVE_OBJECT_SCHEMA,
     stream: false,
     systemPrompt: SYSTEM_PROMPT,
     type: 'deep-reasoning',
-    contents: { highlights: { maxCharacters: 4000 } },
   });
 }

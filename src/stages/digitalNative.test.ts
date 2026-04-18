@@ -8,20 +8,27 @@ import {
 import type { ExaSearchResponse } from '../apis/exa.js';
 import type { StageCompany } from './types.js';
 
-function buildResponse(content: string): ExaSearchResponse {
+function buildResponse(content: unknown): ExaSearchResponse {
   return {
     results: [],
     searchTime: 0,
-    output: { content, grounding: [] },
+    output: { content: content as Record<string, unknown>, grounding: [] },
     costDollars: { total: 0 },
   };
 }
 
 describe('parseDigitalNativeResponse', () => {
-  it('parses a single well-formed block for a single company', () => {
-    const raw = buildResponse(
-      'acme.com\nCATEGORY: Digital-native B2C\nCONFIDENCE: High\nREASON: Sells consumer apps.'
-    );
+  it('parses a well-formed structured response for a single company', () => {
+    const raw = buildResponse({
+      companies: [
+        {
+          domain: 'acme.com',
+          category: 'Digital-native B2C',
+          confidence: 'High',
+          reason: 'Sells consumer apps.',
+        },
+      ],
+    });
     const companies: StageCompany[] = [{ companyName: 'Acme', domain: 'acme.com' }];
     const out = parseDigitalNativeResponse(raw, companies);
     expect(out).toHaveLength(1);
@@ -33,20 +40,23 @@ describe('parseDigitalNativeResponse', () => {
     });
   });
 
-  it('parses multiple blocks separated by blank lines', () => {
-    const raw = buildResponse(
-      [
-        'acme.com',
-        'CATEGORY: Digital-native B2C',
-        'CONFIDENCE: High',
-        'REASON: Consumer app.',
-        '',
-        'beta.io',
-        'CATEGORY: Digital-native B2B',
-        'CONFIDENCE: Medium',
-        'REASON: SaaS for businesses.',
-      ].join('\n')
-    );
+  it('parses multiple companies in the structured response', () => {
+    const raw = buildResponse({
+      companies: [
+        {
+          domain: 'acme.com',
+          category: 'Digital-native B2C',
+          confidence: 'High',
+          reason: 'Consumer app.',
+        },
+        {
+          domain: 'beta.io',
+          category: 'Digital-native B2B',
+          confidence: 'Medium',
+          reason: 'SaaS for businesses.',
+        },
+      ],
+    });
     const companies: StageCompany[] = [
       { companyName: 'Acme', domain: 'acme.com' },
       { companyName: 'Beta', domain: 'beta.io' },
@@ -56,10 +66,17 @@ describe('parseDigitalNativeResponse', () => {
     expect(out[1]!.data?.category).toBe('Digital-native B2B');
   });
 
-  it('strips a leading www. from the domain line when matching', () => {
-    const raw = buildResponse(
-      'www.acme.com\nCATEGORY: Digital-native B2C\nCONFIDENCE: High\nREASON: ok.'
-    );
+  it('strips a leading www. from the domain when matching', () => {
+    const raw = buildResponse({
+      companies: [
+        {
+          domain: 'www.acme.com',
+          category: 'Digital-native B2C',
+          confidence: 'High',
+          reason: 'ok.',
+        },
+      ],
+    });
     const out = parseDigitalNativeResponse(raw, [
       { companyName: 'Acme', domain: 'acme.com' },
     ]);
@@ -67,9 +84,16 @@ describe('parseDigitalNativeResponse', () => {
   });
 
   it('lowercases the parsed domain when matching', () => {
-    const raw = buildResponse(
-      'ACME.com\nCATEGORY: Digital-native B2C\nCONFIDENCE: High\nREASON: ok.'
-    );
+    const raw = buildResponse({
+      companies: [
+        {
+          domain: 'ACME.com',
+          category: 'Digital-native B2C',
+          confidence: 'High',
+          reason: 'ok.',
+        },
+      ],
+    });
     const out = parseDigitalNativeResponse(raw, [
       { companyName: 'Acme', domain: 'acme.com' },
     ]);
@@ -77,27 +101,34 @@ describe('parseDigitalNativeResponse', () => {
   });
 
   it('returns "no output from Exa" when a company is not present in the response', () => {
-    const raw = buildResponse('acme.com\nCATEGORY: Digital-native B2C\nCONFIDENCE: High\nREASON: ok.');
+    const raw = buildResponse({
+      companies: [
+        {
+          domain: 'acme.com',
+          category: 'Digital-native B2C',
+          confidence: 'High',
+          reason: 'ok.',
+        },
+      ],
+    });
     const out = parseDigitalNativeResponse(raw, [
       { companyName: 'Missing', domain: 'missing.com' },
     ]);
     expect(out[0]!.error).toBe('no output from Exa');
   });
 
-  it('skips malformed blocks (missing required fields)', () => {
-    const raw = buildResponse(
-      [
-        'acme.com',
-        'CATEGORY: Digital-native B2C',
-        'CONFIDENCE: High',
-        // no REASON — block should be skipped
-        '',
-        'beta.io',
-        'CATEGORY: Digital-native B2B',
-        'CONFIDENCE: High',
-        'REASON: valid.',
-      ].join('\n')
-    );
+  it('skips items with missing required fields', () => {
+    const raw = buildResponse({
+      companies: [
+        { domain: 'acme.com', category: 'Digital-native B2C', confidence: 'High' },
+        {
+          domain: 'beta.io',
+          category: 'Digital-native B2B',
+          confidence: 'High',
+          reason: 'valid.',
+        },
+      ],
+    });
     const out = parseDigitalNativeResponse(raw, [
       { companyName: 'Acme', domain: 'acme.com' },
       { companyName: 'Beta', domain: 'beta.io' },
@@ -106,20 +137,48 @@ describe('parseDigitalNativeResponse', () => {
     expect(out[1]!.data?.category).toBe('Digital-native B2B');
   });
 
-  it('captures REASON content up to the next UPPERCASE FIELD line', () => {
+  it('skips items with an unknown category', () => {
+    const raw = buildResponse({
+      companies: [
+        {
+          domain: 'acme.com',
+          category: 'Not A Real Category',
+          confidence: 'High',
+          reason: 'bogus.',
+        },
+      ],
+    });
+    const out = parseDigitalNativeResponse(raw, [
+      { companyName: 'Acme', domain: 'acme.com' },
+    ]);
+    expect(out[0]!.error).toBe('no output from Exa');
+  });
+
+  it('skips the company when Exa returns content as a JSON string instead of an object', () => {
     const raw = buildResponse(
-      [
-        'acme.com',
-        'CATEGORY: Digital-native B2C',
-        'CONFIDENCE: High',
-        'REASON: Actual reason here.',
-        'CITATIONS: https://example.com',
-      ].join('\n')
+      JSON.stringify({
+        companies: [
+          {
+            domain: 'acme.com',
+            category: 'Digital-native B2C',
+            confidence: 'High',
+            reason: 'JSON-stringified.',
+          },
+        ],
+      })
     );
     const out = parseDigitalNativeResponse(raw, [
       { companyName: 'Acme', domain: 'acme.com' },
     ]);
-    expect(out[0]!.data?.reason).toBe('Actual reason here.');
+    expect(out[0]!.error).toBe('no output from Exa');
+  });
+
+  it('handles an empty companies array gracefully', () => {
+    const raw = buildResponse({ companies: [] });
+    const out = parseDigitalNativeResponse(raw, [
+      { companyName: 'Acme', domain: 'acme.com' },
+    ]);
+    expect(out[0]!.error).toBe('no output from Exa');
   });
 });
 
@@ -156,14 +215,14 @@ describe('digitalNativeGate', () => {
 });
 
 describe('formatDigitalNativeForAttio', () => {
-  it('renders the documented multi-line Attio value format', () => {
+  it('renders the documented Attio value format with blank lines between sections', () => {
     const data: DigitalNativeData = {
       category: 'Digital-native B2C',
       confidence: 'High',
       reason: 'Sells consumer apps.',
     };
     expect(formatDigitalNativeForAttio(data)).toBe(
-      'Digital-native B2C\nConfidence: High\nReasoning: Sells consumer apps.'
+      'Digital-native B2C\n\nConfidence: High\n\nReasoning: Sells consumer apps.'
     );
   });
 });
