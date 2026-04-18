@@ -10,22 +10,25 @@ CLI script that enriches the companies data (from a CSV) via Apify, Exa, TheirSt
 - apify-client — Apify actor runs
 - openai — Azure OpenAI SDK
 - csv-parse / csv-stringify — CSV I/O
-- p-limit — concurrency control
+- bottleneck — token-bucket rate limiter (Exa QPS)
+- p-limit — concurrency limiter (Attio writes)
 - dotenv — env loading
+- vitest — unit tests
 
 ## Architecture
 ```
 src/
   index.ts          — CLI entry: registers all commands via commander
-  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS (single source of truth)
+  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY (single source of truth)
   types.ts          — EnrichableColumn, EnrichmentResult, InputRow, EnricherFn, AttioRecord
+  rateLimit.ts      — Bottleneck instance for Exa (QPS-paced) + p-limit for Attio writes; exports scheduleExa + attioWriteLimit
   pipeline.ts       — runPipeline (all columns) + runSingleEnricher (one column)
   csv.ts            — readInputCsv
   util.ts           — deriveDomain, nowIso, withRetry
   cache.ts          — disk cache helpers
   apis/
     attio.ts        — Attio REST client: find/create/update/upsertCompanyByDomain
-    exa.ts          — Exa search calls; ExaSearchResponse type
+    exa.ts          — Exa search calls; ExaSearchResponse type; digitalNativeExaSearch uses structured JSON output schema
     apify.ts        — Apify actor helpers
     openai.ts       — Azure OpenAI wrapper
     theirstack.ts   — TheirStack API
@@ -38,19 +41,36 @@ src/
     index.ts        — ENRICHERS map (EnrichableColumn → EnricherFn) + ENRICHABLE_COLUMN_LIST
   stages/
     types.ts        — StageCompany, StageResult<T>, GateRule<T>
-    runStage.ts     — generic batched stage runner (sequential, per-batch error isolation)
-    writeStageColumn.ts — write one column to Attio for all successful stage results
+    runStage.ts     — generic stage runner: batches concurrent via Promise.all, per-batch retry with exponential backoff (1s→4s→16s), afterBatch fires as soon as each batch resolves
+    writeStageColumn.ts — write one column to Attio for all successful stage results; bounded by attioWriteLimit; logs and swallows per-row failures
     filterSurvivors.ts  — apply gate, log passed/rejected/errored counts
-    digitalNative.ts    — Stage 1: parser, gate, Attio formatter
+    digitalNative.ts    — Stage 1: parser (structured JSON), gate, Attio formatter
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
+
+## Concurrency & rate limits
+All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). Attio writes go through `attioWriteLimit` (default `p-limit(5)`).
+
+`runStage` fires all batches concurrently — back-pressure comes from the Exa limiter, not from sequential looping. Each batch:
+1. Calls `call()` (rate-limited by Bottleneck).
+2. Retries on failure with exponential backoff (`EXA_RETRY_TRIES` attempts, base `EXA_RETRY_BASE_MS`, factor 4 → 1s, 4s, 16s). Retries are per-batch and do not block other batches.
+3. On terminal failure, yields `{company, error}` results for that batch and moves on.
+4. `afterBatch` (usually Attio writes) fires as soon as the batch resolves, independently of other batches. afterBatch errors are logged and swallowed — they never abort the stage.
+
+Tunables in `.env`:
+- `EXA_QPS` (default 8) — Exa calls per second
+- `EXA_RETRY_TRIES` (default 3)
+- `EXA_RETRY_BASE_MS` (default 1000)
+- `ATTIO_WRITE_CONCURRENCY` (default 5) — max in-flight Attio upserts
 
 ## Stage-wise pipeline (enrich-all)
 
 `enrich-all` processes all companies stage-by-stage (not row-by-row), to preserve Exa's batch-of-2 cost efficiency.
 
-Flow: load CSV → Stage 1 (all companies) → write results → filter survivors → Stage 2 (survivors only) → … → write final results.
+Flow: load CSV → pre-fetch Attio records (so already-filled companies can be skipped per-stage) → Stage 1 (all companies, concurrent within Exa QPS) → Attio write per batch as results arrive → filter survivors → Stage 2 (survivors only) → … → write final results.
+
+No on-disk progress ledger. Resume semantics come from the Attio pre-fetch: on startup, any company whose target column is already populated is skipped for that stage.
 
 ### Stage order and gating rules
 
@@ -67,12 +87,17 @@ Stages 1–5 are gating stages. Companies rejected at any gate are written to At
 
 ### Attio value format for Exa-based stages
 
-Multi-line string stored in the column cell:
+Multi-line string stored in the column cell (blank lines between sections):
 ```
 <category or tool name returned by Exa>
+
 Confidence: <High | Medium | Low>
+
 Reasoning: <Exa's reason text>
 ```
+
+### Exa output schema
+Digital Native uses Exa's structured `outputSchema` (object with `companies[]`), not freeform text. Parser lives in `stages/digitalNative.ts` and reads `raw.output.content` as a parsed object. New Exa stages should follow the same pattern — prefer structured schemas over text parsing.
 
 ### API mapping
 - **Exa (batch of 2)**: Digital Native, Observability Tool, Competitor Tooling, Cloud Tool, Funding Growth, Revenue Growth, Number of Users
@@ -87,6 +112,7 @@ npm run enrich-column -- --column "Digital Native" --domain acme.com
 npm run attio-smoke -- --domain kobie.com
 npm run typecheck
 npm run build
+npm test
 ```
 
 ## Code Style
@@ -94,8 +120,9 @@ npm run build
 - All imports use `.js` extension (ESM, `moduleResolution: Bundler`)
 - Column names are string literals used as object keys throughout — must match Attio exactly
 - Attio field slugs live in `attio.ts:FIELD_SLUGS` (code constant, not env)
-- All env values read through `KEYS` in `config.ts` — never access `process.env` directly elsewhere
+- All env values read through `KEYS` (or the named exports) in `config.ts` — never access `process.env` directly elsewhere
 - Enrichers all have signature `(input: EnricherInput) => Promise<string>` — return `''` if unavailable
+- Outbound Exa calls must be wrapped in `scheduleExa(...)`; Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`)
 - No comments unless the WHY is non-obvious
 
 ## Testing
@@ -112,6 +139,17 @@ After every build or code change:
 - Adding a new Attio column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `apis/attio.ts:FIELD_SLUGS`
 - Never add business logic decisions (what counts as Digital Native, confidence thresholds, etc.) without asking the user first
 - `toAttioValues` skips empty strings — enrichers must return `''` not `null`/`undefined` to avoid writing blanks to Attio
+- Never call `exa.search` directly — always go through `scheduleExa()`; never call `upsertCompanyByDomain` in a tight loop without the `attioWriteLimit` gate
+
+## Keep this CLAUDE.md current
+Update this file in the same change that introduces a new pattern, module, dependency, command, env var, or rule. Do not defer it. Specifically, when you:
+- add a file under `src/` or a new subdirectory → update the Architecture tree
+- add a dependency → update the Stack list
+- add/rename/remove an `npm run` script → update the Commands block
+- introduce a new concurrency/rate-limit pattern, retry policy, or external service → update the relevant section
+- establish a new convention or hard rule → add it to Code Style or Rules
+
+Keep entries terse. Remove stale entries rather than leaving them. Do not add changelog-style dated entries — this file describes current state; git log is for history.
 
 ## Compaction
 When compacting, always preserve: list of modified files, any failing typecheck errors, which enricher columns have real implementations vs stubs, and which stages are wired into enrich-all vs still pending.

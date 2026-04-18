@@ -71,4 +71,37 @@ describe('writeStageColumn', () => {
     expect(line).toContain('written=1');
     expect(line).toContain('skipped=1');
   });
+
+  it('logs and continues when an Attio upsert throws, without aborting the batch', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    upsertMock
+      .mockReset()
+      .mockRejectedValueOnce(new Error('attio 500'))
+      .mockResolvedValueOnce({ id: 'rec_2', values: {} });
+
+    const results: StageResult<{ x: string }>[] = [
+      { company: { companyName: 'Acme', domain: 'acme.com' }, data: { x: 'a' } },
+      { company: { companyName: 'Beta', domain: 'beta.io' }, data: { x: 'b' } },
+    ];
+    await expect(writeStageColumn('Digital Native', results, (d) => d.x)).resolves.toBeUndefined();
+    expect(upsertMock).toHaveBeenCalledTimes(2);
+    const errLine = errSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(errLine).toContain('acme.com');
+    expect(errLine).toContain('attio 500');
+  });
+
+  it('logs a failed count when writes fail', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    upsertMock.mockReset().mockRejectedValue(new Error('attio boom'));
+
+    const results: StageResult<{ x: string }>[] = [
+      { company: { companyName: 'Acme', domain: 'acme.com' }, data: { x: 'a' } },
+      { company: { companyName: 'Beta', domain: 'beta.io' }, data: { x: 'b' } },
+    ];
+    await writeStageColumn('Digital Native', results, (d) => d.x);
+    const summary = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(summary).toContain('written=0');
+    expect(summary).toContain('failed=2');
+  });
 });

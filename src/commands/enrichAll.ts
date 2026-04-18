@@ -1,6 +1,7 @@
-import { PATHS } from '../config.js';
+import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch } from '../apis/exa.js';
+import { scheduleExa } from '../rateLimit.js';
 import { deriveDomain } from '../util.js';
 import type { InputRow } from '../types.js';
 import type { StageCompany } from '../stages/types.js';
@@ -80,7 +81,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     name: 'digitalNative',
     companies: stage1Todo,
     batchSize: 2,
-    call: (domains) => digitalNativeExaSearch(domains),
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => scheduleExa(() => digitalNativeExaSearch(domains)),
     parse: (raw, batch) => parseDigitalNativeResponse(raw, batch),
     afterBatch: async (batchResults) => {
       await writeStageColumn('Digital Native', batchResults, formatDigitalNativeForAttio);

@@ -142,4 +142,89 @@ describe('runStage', () => {
     expect(results).toHaveLength(2);
     expect(results[0]?.error).toBeUndefined();
   });
+
+  it('retries a failing batch up to retry.tries and succeeds on the last attempt', async () => {
+    const companies = makeCompanies(2);
+    const call = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('hiccup1'))
+      .mockRejectedValueOnce(new Error('hiccup2'))
+      .mockResolvedValueOnce('raw');
+    const parse = vi.fn().mockImplementation((_raw: string, batch: StageCompany[]) =>
+      batch.map<StageResult<string>>((c) => ({ company: c, data: 'ok' }))
+    );
+
+    const out = await runStage({
+      name: 's',
+      companies,
+      batchSize: 2,
+      call,
+      parse,
+      retry: { tries: 3, baseMs: 1 },
+    });
+    expect(call).toHaveBeenCalledTimes(3);
+    expect(out[0]!.error).toBeUndefined();
+    expect(out[0]!.data).toBe('ok');
+  });
+
+  it('gives up after retry.tries exhausted and yields per-company error results', async () => {
+    const companies = makeCompanies(2);
+    const call = vi.fn().mockRejectedValue(new Error('always-fails'));
+    const parse = vi.fn();
+
+    const out = await runStage({
+      name: 's',
+      companies,
+      batchSize: 2,
+      call,
+      parse,
+      retry: { tries: 3, baseMs: 1 },
+    });
+    expect(call).toHaveBeenCalledTimes(3);
+    expect(out[0]!.error).toBe('always-fails');
+    expect(out[1]!.error).toBe('always-fails');
+  });
+
+  it('does not block other batches while one batch is retrying', async () => {
+    const companies = makeCompanies(4);
+    let slowResolved = false;
+    const call = vi.fn().mockImplementation(async (domains: string[]) => {
+      if (domains[0] === 'co0.com') {
+        await new Promise((r) => setTimeout(r, 50));
+        slowResolved = true;
+        return 'raw-slow';
+      }
+      expect(slowResolved).toBe(false);
+      return 'raw-fast';
+    });
+    const parse = vi.fn().mockImplementation((_raw: string, batch: StageCompany[]) =>
+      batch.map<StageResult<string>>((c) => ({ company: c, data: 'ok' }))
+    );
+
+    const out = await runStage({ name: 's', companies, batchSize: 2, call, parse });
+    expect(out).toHaveLength(4);
+  });
+
+  it('swallows afterBatch throws so one bad write does not abort the stage', async () => {
+    const companies = makeCompanies(4);
+    const call = vi.fn().mockResolvedValue('raw');
+    const parse = vi.fn().mockImplementation((_raw: string, batch: StageCompany[]) =>
+      batch.map<StageResult<string>>((c) => ({ company: c, data: 'ok' }))
+    );
+    const afterBatch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('attio-write-blew-up'))
+      .mockResolvedValue(undefined);
+
+    const out = await runStage({
+      name: 's',
+      companies,
+      batchSize: 2,
+      call,
+      parse,
+      afterBatch,
+    });
+    expect(out).toHaveLength(4);
+    expect(out.every((r) => r.error === undefined)).toBe(true);
+  });
 });
