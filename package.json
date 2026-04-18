@@ -10,7 +10,8 @@
     "enrich-column": "tsx src/index.ts enrich-column",
     "attio-smoke": "tsx src/index.ts attio-smoke",
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run"
   },
   "engines": {
     "node": ">=18"
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@types/node": "^20.12.12",
     "tsx": "^4.11.0",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.4"
   }
 }

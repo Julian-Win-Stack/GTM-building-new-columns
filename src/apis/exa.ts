@@ -1,6 +1,30 @@
 import Exa from 'exa-js';
 import { KEYS } from '../config.js';
 
+export type ExaSearchResponse = {
+  results: Array<{
+    id: string;
+    url: string;
+    title: string;
+    highlights?: string[];
+    highlightScores?: number[];
+    publishedDate?: string;
+    author?: string;
+    image?: string;
+    favicon?: string;
+  }>;
+  searchTime: number;
+  output: {
+    content: string;
+    grounding: Array<{
+      field: string;
+      citations: Array<{ url: string; title: string }>;
+      confidence: string;
+    }>;
+  };
+  costDollars: { total: number };
+};
+
 const exa = new Exa(KEYS.exa);
 
 const SYSTEM_PROMPT = `You are a strict business model classification system.
@@ -65,7 +89,7 @@ const OUTPUT_SCHEMA_DESC =
   'REASON: [2–3 sentence justification referencing specific product behavior, not just company description]\n\n' +
   'Repeat this block for each company.';
 
-export async function digitalNativeExaSearch(domains: string[]): Promise<unknown> {
+export async function digitalNativeExaSearch(domains: string[]): Promise<ExaSearchResponse> {
   if (domains.length === 0) throw new Error('digitalNativeExaSearch: need at least 1 domain');
 
   const query =
@@ -73,8 +97,7 @@ export async function digitalNativeExaSearch(domains: string[]): Promise<unknown
       ? `Research for ${domains[0]}`
       : `Research for ${domains.slice(0, -1).join(', ')} and ${domains[domains.length - 1]}`;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return await (exa.search as any)(query, {
+  return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
     numResults: 10,
     outputSchema: { type: 'text', description: OUTPUT_SCHEMA_DESC },
     stream: false,

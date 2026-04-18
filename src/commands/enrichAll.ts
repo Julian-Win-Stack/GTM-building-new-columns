@@ -3,6 +3,15 @@ import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch } from '../apis/exa.js';
 import { deriveDomain } from '../util.js';
 import type { InputRow } from '../types.js';
+import type { StageCompany } from '../stages/types.js';
+import { runStage } from '../stages/runStage.js';
+import { writeStageColumn } from '../stages/writeStageColumn.js';
+import { filterSurvivors } from '../stages/filterSurvivors.js';
+import {
+  parseDigitalNativeResponse,
+  digitalNativeGate,
+  formatDigitalNativeForAttio,
+} from '../stages/digitalNative.js';
 
 export type EnrichAllOptions = {
   csv?: string;
@@ -15,46 +24,47 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const rows = await readInputCsv(csvPath);
   const subset = opts.limit ? rows.slice(0, opts.limit) : rows;
 
-  type Usable = { row: InputRow; domain: string; label: string };
-  const usable: Usable[] = [];
+  const companies: StageCompany[] = [];
   let skippedBadDomain = 0;
 
   for (const row of subset) {
-    const label = row['Company Name'] || row['Website'] || '(unknown)';
-    const domain = deriveDomain(row['Website']);
+    const label = (row as InputRow)['Company Name'] || (row as InputRow)['Website'] || '(unknown)';
+    const domain = deriveDomain((row as InputRow)['Website']);
     if (!domain) {
       skippedBadDomain++;
-      console.error(`[fail] ${label}: no parseable domain in Website — skipping`);
+      console.error(`[fail] ${label}: no parseable domain — skipping`);
       continue;
     }
-    usable.push({ row, domain, label });
+    companies.push({ companyName: (row as InputRow)['Company Name'], domain });
   }
-
-  const batches: Usable[][] = [];
-  for (let i = 0; i < usable.length; i += 2) batches.push(usable.slice(i, i + 2));
 
   console.log(
-    `[enrich-all] csv=${csvPath} rows=${subset.length} usable=${usable.length} batches=${batches.length} badDomains=${skippedBadDomain} dryRun=${!!opts.dryRun}`
+    `[enrich-all] csv=${csvPath} rows=${subset.length} companies=${companies.length} badDomains=${skippedBadDomain} dryRun=${!!opts.dryRun}`
   );
 
-  for (const batch of batches) {
-    const domains = batch.map((b) => b.domain);
-    const labels = batch.map((b) => b.label).join(' + ');
-
-    if (opts.dryRun) {
-      console.log(`[dry] digital-native Exa: ${domains.join(', ')}  (${labels})`);
-      continue;
+  if (opts.dryRun) {
+    for (let i = 0; i < companies.length; i += 2) {
+      const batch = companies.slice(i, i + 2);
+      console.log(`[dry] digital-native: ${batch.map((c) => c.domain).join(', ')}`);
     }
-
-    console.log(`\n=== [digital-native] batch: ${domains.join(', ')}  (${labels}) ===`);
-    try {
-      const response = await digitalNativeExaSearch(domains);
-      console.log(JSON.stringify(response, null, 2));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[fail] digital-native batch ${domains.join(', ')}: ${msg}`);
-    }
+    return;
   }
 
-  console.log(`\n[done] batches=${batches.length} badDomains=${skippedBadDomain}`);
+  // Stage 1 — Digital Native
+  const stage1Results = await runStage({
+    name: 'digitalNative',
+    companies,
+    batchSize: 2,
+    call: (domains) => digitalNativeExaSearch(domains),
+    parse: (raw, batch) => parseDigitalNativeResponse(raw, batch),
+  });
+
+  await writeStageColumn('Digital Native', stage1Results, formatDigitalNativeForAttio);
+
+  const survivors = filterSurvivors('digitalNative', stage1Results, digitalNativeGate);
+
+  console.log(`\n[enrich-all] survivors (${survivors.length}):`);
+  for (const c of survivors) console.log(`  ${c.domain}  (${c.companyName})`);
+
+  console.log(`\n[done] total=${companies.length} survivors=${survivors.length} badDomains=${skippedBadDomain}`);
 }
