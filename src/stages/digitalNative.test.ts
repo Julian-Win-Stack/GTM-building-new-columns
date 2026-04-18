@@ -189,10 +189,10 @@ describe('digitalNativeGate', () => {
     ).toBe(false);
   });
 
-  it('rejects Digital-native B2B', () => {
+  it('accepts Digital-native B2B', () => {
     expect(
       digitalNativeGate({ category: 'Digital-native B2B', confidence: 'High', reason: 'x' })
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('accepts Digital-native B2C', () => {

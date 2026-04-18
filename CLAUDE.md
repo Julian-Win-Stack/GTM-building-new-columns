@@ -76,7 +76,7 @@ No on-disk progress ledger. Resume semantics come from the Attio pre-fetch: on s
 
 | # | Column | API | Gate (pass condition) |
 |---|---|---|---|
-| 1 | Digital Native | Exa | category is NOT `NOT Digital-native` AND NOT `Digital-native B2B` |
+| 1 | Digital Native | Exa | category is NOT `NOT Digital-native` (B2B companies continue) |
 | 2 | Observability Tool | Exa | no tool evidence OR at least one of: Datadog, Grafana, Prometheus |
 | 3 | Communication Tool | TheirStack | no evidence OR uses Slack (reject if Microsoft Teams / Microsoft) |
 | 4 | Competitor Tooling | Exa | NOT using any of: Resolve.ai, Rootly, Incident.io, FireHydrant, PagerDuty, Opsgenie, xMatters, Splunk On-Call, BigPanda, Moogsoft |

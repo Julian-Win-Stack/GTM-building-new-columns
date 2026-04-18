@@ -75,7 +75,7 @@ export function parseDigitalNativeResponse(
 }
 
 export const digitalNativeGate: GateRule<DigitalNativeData> = (d) =>
-  d.category !== 'NOT Digital-native' && d.category !== 'Digital-native B2B';
+  d.category !== 'NOT Digital-native';
 
 export function formatDigitalNativeForAttio(d: DigitalNativeData): string {
   return `${d.category}\n\nConfidence: ${d.confidence}\n\nReasoning: ${d.reason}`;
