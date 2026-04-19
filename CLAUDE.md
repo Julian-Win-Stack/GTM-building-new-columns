@@ -32,7 +32,7 @@ src/
   apis/
     attio.ts        — Attio REST client: find/create/update/upsertCompanyByDomain
 ****    exa.ts          — Exa search calls; ExaSearchResponse type; all Exa stage functions use structured JSON outputSchema + type:'deep-reasoning'
-    apify.ts        — Apify actor client: runHarvestLinkedInEmployees (harvestapi/linkedin-company-employees, run-sync via SDK)
+    apify.ts        — Apify actor client: runHarvestLinkedInEmployees (harvestapi/linkedin-company-employees, run-sync via SDK); runCareerSiteJobListings (fantastic-jobs/career-site-job-listing-feed, run-sync via SDK)
     openai.ts       — Azure OpenAI wrapper
     theirstack.ts   — TheirStack API
     apollo.ts       — Apollo REST API client: apolloMixedPeopleApiSearch (POST /mixed_people/api_search, reads total_entries)
@@ -55,6 +55,7 @@ src/
     numberOfUsers.ts    — Stage 8: parser (structured JSON), no gate, Attio formatter (User count / Reasoning / Source link multi-line)
     numberOfEngineers.ts — Stage 9: Apollo api_search parser, no gate, Attio formatter (plain integer string e.g. "47"); exports ENGINEER_TITLES
     numberOfSres.ts      — Stage 10: Apify harvestapi parser (counts items), no gate, Attio formatter (plain integer string e.g. "3", or "N/A" when no LinkedIn URL); exports SRE_TITLES
+    engineerHiring.ts    — Stage 11+12: Apify career-site-job-listing-feed parser (one call → two columns), no gate, Attio formatters for Engineer Hiring and SRE Hiring; exports ENGINEER_HIRING_TITLE_SEARCH, ENGINEER_HIRING_TITLE_EXCLUSIONS
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
@@ -108,7 +109,9 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 8 | Number of Users | Exa | no gate — data collection only |
 | 9 | Number of Engineers | Apollo | no gate — data collection only |
 | 10 | Number of SREs | Apify | no gate — data collection only |
-| 11–16 | remaining columns | various | no gate — data collection only |
+| 11 | Engineer Hiring | Apify | no gate — data collection only |
+| 12 | SRE Hiring | Apify (same call as Stage 11) | no gate — data collection only |
+| 13–16 | remaining columns | various | no gate — data collection only |
 
 Stages 1–5 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing.
 
@@ -218,9 +221,30 @@ https://linkedin.com/in/person3
 ```
 Written as `N/A` when the company has no `Company Linkedin Url` in the CSV. Written as a plain integer (e.g. `0`) when Apify returns items with no `linkedinUrl` field. Cap is 20 (actor `maxItems: 20`). Titles searched: `["SRE", "Site Reliability", "Site Reliability Engineer"]`. Excluded seniority level IDs: `["310", "320"]`.
 
+**Engineer Hiring** — count on the first line, blank line, then one `title: url` per line:
+```
+5
+
+Senior Engineer: https://acme.com/jobs/1
+SRE: https://acme.com/jobs/2
+...
+```
+Written as `0` when the actor returns no matching jobs. Titles are filtered by the actor via `titleSearch`/`titleExclusionSearch` constants in `engineerHiring.ts`; all returned items are counted.
+
+**SRE Hiring** — same format as Engineer Hiring, but only items whose title contains "SRE" or "Site Reliability" (case-insensitive substring):
+```
+2
+
+Site Reliability Engineer: https://acme.com/jobs/2
+Sr. SRE: https://acme.com/jobs/3
+```
+Written as `0` when no items match the SRE keywords. Derived from the same Apify response as Engineer Hiring — no second API call.
+
 **LinkedIn Page** — written once at pipeline start (pre-flight, before Stage 1) for companies that have no existing Attio record. Value comes directly from the `Company Linkedin Url` column in the input CSV. Not written for companies already in Attio.
 
-Stages 6–10 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
+Stages 6–12 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
+
+Stages 11 and 12 share a single `runStage` invocation (one Apify call per company) whose `afterBatch` writes both Engineer Hiring and SRE Hiring columns. Cache-skip requires both slugs to be non-empty; either blank triggers a fresh call.
 
 ### Exa output schema
 All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue Growth, Number of Users) use Exa's `outputSchema` (object with `companies[]`), not freeform text. Parsers read `raw.output.content` as a parsed object. New Exa stages should follow the same pattern — prefer structured schemas over text parsing.
@@ -231,7 +255,8 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 - **TheirStack**: Communication Tool
 - **Apollo**: Number of Engineers
 - **Apify (harvestapi/linkedin-company-employees)**: Number of SREs
-- **TBD**: Engineer Hiring, SRE Hiring, Customer complains on X, Recent incidents ( Official ), AI adoption mindset, AI SRE maturity
+- **Apify (fantastic-jobs/career-site-job-listing-feed)**: Engineer Hiring, SRE Hiring (single call per company feeds both columns)
+- **TBD**: Customer complains on X, Recent incidents ( Official ), AI adoption mindset, AI SRE maturity
 
 ## Commands
 ```
@@ -254,7 +279,7 @@ npm test
 - Outbound Exa calls must be wrapped in `scheduleExa(...)`; Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`)
 - Outbound TheirStack calls must be wrapped in `scheduleTheirstack(...)` — never call `theirstackJobsByTechnology` directly
 - Outbound Apollo calls must be wrapped in `scheduleApollo(...)` — never call `apolloMixedPeopleApiSearch` directly
-- Outbound Apify calls must be wrapped in `scheduleApify(...)` — never call `runHarvestLinkedInEmployees` directly
+- Outbound Apify calls must be wrapped in `scheduleApify(...)` — never call `runHarvestLinkedInEmployees` or `runCareerSiteJobListings` directly
 - No comments unless the WHY is non-obvious
 
 ## Testing

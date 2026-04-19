@@ -24,3 +24,28 @@ export async function runHarvestLinkedInEmployees(
   const { items } = await client.dataset(run.defaultDatasetId).listItems();
   return { items: items as HarvestEmployeeItem[] };
 }
+
+export type CareerSiteJobItem = { title?: string; url?: string; [k: string]: unknown };
+export type CareerSiteJobListingsResponse = { items: CareerSiteJobItem[] };
+
+export async function runCareerSiteJobListings(domain: string): Promise<CareerSiteJobListingsResponse> {
+  const run = await client.actor('fantastic-jobs/career-site-job-listing-feed').call({
+    aiHasSalary: false,
+    aiVisaSponsorshipFilter: false,
+    domainFilter: [domain],
+    includeAi: false,
+    includeLinkedIn: false,
+    limit: 200,
+    populateAiRemoteLocation: false,
+    populateAiRemoteLocationDerived: false,
+    'remote only (legacy)': false,
+    removeAgency: false,
+    titleExclusionSearch: [
+      'Hardware', 'Electrical', 'Mechanical', 'Civil', 'Firmware',
+      'Embedded', 'RF', 'Manufacturing', 'Process', 'product',
+    ],
+    titleSearch: ['SRE', 'Site Reliability Engineer', 'engineer', 'Site Reliability'],
+  });
+  const { items } = await client.dataset(run.defaultDatasetId).listItems();
+  return { items: items as CareerSiteJobItem[] };
+}

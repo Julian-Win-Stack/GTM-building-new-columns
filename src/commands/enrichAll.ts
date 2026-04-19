@@ -48,7 +48,8 @@ import { parseNumberOfUsersResponse, formatNumberOfUsersForAttio } from '../stag
 import { apolloMixedPeopleApiSearch } from '../apis/apollo.js';
 import { parseNumberOfEngineersResponse, formatNumberOfEngineersForAttio, ENGINEER_TITLES } from '../stages/numberOfEngineers.js';
 import { parseNumberOfSresResponse, formatNumberOfSresForAttio, SRE_TITLES, type NumberOfSresData } from '../stages/numberOfSres.js';
-import { runHarvestLinkedInEmployees, type HarvestEmployeesResponse } from '../apis/apify.js';
+import { runHarvestLinkedInEmployees, runCareerSiteJobListings, type HarvestEmployeesResponse, type CareerSiteJobListingsResponse } from '../apis/apify.js';
+import { parseHiringResponse, formatEngineerHiringForAttio, formatSreHiringForAttio, type CombinedHiringData } from '../stages/engineerHiring.js';
 import { fetchAllRecords, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
@@ -430,6 +431,42 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, { ...existing, [stage10Slug]: formatNumberOfSresForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // Stage 11+12 — Engineer Hiring + SRE Hiring (non-gating, single Apify call feeds both columns)
+  const stage11EngSlug = FIELD_SLUGS['Engineer Hiring']!;
+  const stage11SreSlug = FIELD_SLUGS['SRE Hiring']!;
+  const stage11Todo = survivorsAfterStage5.filter((c) => {
+    const cached = attioCache.get(c.domain) ?? {};
+    return !cached[stage11EngSlug] || !cached[stage11SreSlug];
+  });
+  const stage11Done = survivorsAfterStage5.filter((c) => {
+    const cached = attioCache.get(c.domain) ?? {};
+    return !!cached[stage11EngSlug] && !!cached[stage11SreSlug];
+  });
+  console.log(`[engineerHiring+sreHiring] todo=${stage11Todo.length} skipped=${stage11Done.length}`);
+
+  await runStage<CareerSiteJobListingsResponse, CombinedHiringData>({
+    name: 'engineerHiring+sreHiring',
+    companies: stage11Todo,
+    batchSize: 1,
+    retry: { tries: APIFY_RETRY_TRIES, baseMs: APIFY_RETRY_BASE_MS },
+    call: (domains) => scheduleApify(() => runCareerSiteJobListings(domains[0]!)),
+    parse: (raw, batch) => parseHiringResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Engineer Hiring', batchResults, formatEngineerHiringForAttio);
+      await writeStageColumn('SRE Hiring', batchResults, formatSreHiringForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, {
+            ...existing,
+            [stage11EngSlug]: formatEngineerHiringForAttio(r.data),
+            [stage11SreSlug]: formatSreHiringForAttio(r.data),
+          });
         }
       }
     },
