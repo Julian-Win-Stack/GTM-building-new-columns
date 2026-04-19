@@ -7,8 +7,22 @@ const http = axios.create({
   timeout: 60_000,
 });
 
-export async function theirstackJobsSearch(payload: Record<string, unknown>): Promise<unknown> {
-  // TODO: confirm endpoint path + payload shape when you share the spec
-  const { data } = await http.post('/jobs/search', payload);
+export type TheirstackJob = {
+  source_url?: string | null;
+  url?: string | null;
+  final_url?: string | null;
+};
+
+export type TheirstackJobsResponse = { data: TheirstackJob[] };
+
+export async function theirstackJobsByTechnology(
+  domain: string,
+  technologySlug: 'slack' | 'microsoft-teams'
+): Promise<TheirstackJobsResponse> {
+  const { data } = await http.post<TheirstackJobsResponse>('/jobs/search', {
+    limit: 1,
+    job_technology_slug_or: [technologySlug],
+    company_domain_or: [domain],
+  });
   return data;
 }

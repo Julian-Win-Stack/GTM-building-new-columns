@@ -1,6 +1,6 @@
 import Bottleneck from 'bottleneck';
 import pLimit from 'p-limit';
-import { EXA_QPS, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY } from './config.js';
+import { EXA_QPS, THEIRSTACK_QPS, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY } from './config.js';
 
 export const exaLimiter = new Bottleneck({
   reservoir: EXA_QPS,
@@ -14,4 +14,15 @@ export const openaiLimit = pLimit(OPENAI_CONCURRENCY);
 
 export function scheduleExa<T>(fn: () => Promise<T>): Promise<T> {
   return exaLimiter.schedule(fn);
+}
+
+export const theirstackLimiter = new Bottleneck({
+  reservoir: THEIRSTACK_QPS,
+  reservoirRefreshAmount: THEIRSTACK_QPS,
+  reservoirRefreshInterval: 1000,
+  minTime: Math.floor(1000 / THEIRSTACK_QPS),
+});
+
+export function scheduleTheirstack<T>(fn: () => Promise<T>): Promise<T> {
+  return theirstackLimiter.schedule(fn);
 }

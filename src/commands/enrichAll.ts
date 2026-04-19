@@ -1,7 +1,8 @@
-import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS } from '../config.js';
+import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch } from '../apis/exa.js';
-import { scheduleExa } from '../rateLimit.js';
+import { theirstackJobsByTechnology } from '../apis/theirstack.js';
+import { scheduleExa, scheduleTheirstack } from '../rateLimit.js';
 import { deriveDomain } from '../util.js';
 import type { InputRow } from '../types.js';
 import type { StageCompany } from '../stages/types.js';
@@ -18,6 +19,13 @@ import {
   observabilityToolGate,
   formatObservabilityToolForAttio,
 } from '../stages/observabilityTool.js';
+import {
+  parseCommunicationToolResponse,
+  communicationToolGate,
+  formatCommunicationToolForAttio,
+  type CommunicationToolRaw,
+  type CommunicationToolData,
+} from '../stages/communicationTool.js';
 import { fetchAllRecords, FIELD_SLUGS } from '../apis/attio.js';
 
 export type EnrichAllOptions = {
@@ -76,6 +84,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     }
     const { todo: obs, done: obsDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Observability Tool']!);
     console.log(`[dry] observability-tool: todo=${obs.length} skipped=${obsDone.length}`);
+    const { todo: comm, done: commDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Communication Tool']!);
+    console.log(`[dry] communication-tool: todo=${comm.length} skipped=${commDone.length}`);
     return;
   }
 
@@ -131,8 +141,52 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const stage2TodoSurvivors = filterSurvivors('observabilityTool', stage2Results, observabilityToolGate);
   const survivorsAfterStage2 = [...stage2TodoSurvivors, ...stage2Done];
 
-  console.log(`\n[enrich-all] survivors after stage 2 (${survivorsAfterStage2.length}):`);
-  for (const c of survivorsAfterStage2) console.log(`  ${c.domain}  (${c.companyName})`);
+  // Stage 3 — Communication Tool
+  const stage3Slug = FIELD_SLUGS['Communication Tool']!;
+  const { todo: stage3Todo, done: stage3Done } = splitByCache(survivorsAfterStage2, attioCache, stage3Slug);
+  console.log(`[communicationTool] todo=${stage3Todo.length} skipped=${stage3Done.length}`);
 
-  console.log(`\n[done] total=${companies.length} survivors=${survivorsAfterStage2.length} badDomains=${skippedBadDomain}`);
+  const stage3Results = await runStage<CommunicationToolRaw, CommunicationToolData>({
+    name: 'communicationTool',
+    companies: stage3Todo,
+    batchSize: 1,
+    retry: { tries: THEIRSTACK_RETRY_TRIES, baseMs: THEIRSTACK_RETRY_BASE_MS },
+    call: async (domains) => {
+      const domain = domains[0]!;
+      const slackRes = await scheduleTheirstack(() => theirstackJobsByTechnology(domain, 'slack'));
+      const slackJob = slackRes.data?.[0];
+      if (slackJob?.source_url) {
+        return { domain, tool: 'Slack', sourceUrl: slackJob.source_url };
+      }
+      const teamsRes = await scheduleTheirstack(() =>
+        theirstackJobsByTechnology(domain, 'microsoft-teams')
+      );
+      const teamsJob = teamsRes.data?.[0];
+      if (teamsJob?.source_url) {
+        return { domain, tool: 'Microsoft Teams', sourceUrl: teamsJob.source_url };
+      }
+      return { domain, tool: null, sourceUrl: null };
+    },
+    parse: parseCommunicationToolResponse,
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Communication Tool', batchResults, formatCommunicationToolForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, {
+            ...existing,
+            [stage3Slug]: formatCommunicationToolForAttio(r.data),
+          });
+        }
+      }
+    },
+  });
+
+  const stage3TodoSurvivors = filterSurvivors('communicationTool', stage3Results, communicationToolGate);
+  const survivorsAfterStage3 = [...stage3TodoSurvivors, ...stage3Done];
+
+  console.log(`\n[enrich-all] survivors after stage 3 (${survivorsAfterStage3.length}):`);
+  for (const c of survivorsAfterStage3) console.log(`  ${c.domain}  (${c.companyName})`);
+
+  console.log(`\n[done] total=${companies.length} survivors=${survivorsAfterStage3.length} badDomains=${skippedBadDomain}`);
 }

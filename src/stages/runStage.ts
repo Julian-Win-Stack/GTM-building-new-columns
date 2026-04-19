@@ -1,4 +1,23 @@
+import axios from 'axios';
 import type { StageCompany, StageResult } from './types.js';
+
+// Returns wait ms for retryable errors:
+//   - 429: Retry-After header (seconds) or 30s fallback
+//   - 5xx: exponential backoff
+//   - network error (no HTTP response): exponential backoff
+// Returns null for non-retryable errors (4xx other than 429, parse errors, etc.).
+function retryWaitMs(err: unknown, attempt: number, baseMs: number): number | null {
+  if (!axios.isAxiosError(err)) return null;
+  if (!err.response) return baseMs * Math.pow(4, attempt); // network / timeout
+  const { status, headers } = err.response;
+  if (status === 429) {
+    const ra = headers['retry-after'];
+    const secs = ra ? parseInt(ra, 10) : NaN;
+    return isNaN(secs) ? 30_000 : secs * 1000;
+  }
+  if (status >= 500) return baseMs * Math.pow(4, attempt);
+  return null;
+}
 
 type RunStageOptions<TRaw, TData> = {
   name: string;
@@ -26,12 +45,12 @@ async function runOneBatch<TRaw, TData>(
     } catch (err) {
       lastErr = err;
       const msg = err instanceof Error ? err.message : String(err);
-      const isLast = attempt === retry.tries - 1;
+      const wait = retryWaitMs(err, attempt, retry.baseMs);
+      const isLast = attempt === retry.tries - 1 || wait === null;
       if (isLast) {
         console.error(`[${name}] batch failed (${domains.join(', ')}): ${msg}`);
         break;
       }
-      const wait = retry.baseMs * Math.pow(4, attempt);
       console.warn(
         `[${name}] batch attempt ${attempt + 1}/${retry.tries} failed (${domains.join(', ')}): ${msg}. waiting ${wait}ms`
       );

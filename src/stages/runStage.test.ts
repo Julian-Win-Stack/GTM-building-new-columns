@@ -1,6 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
 import { runStage } from './runStage.js';
 import type { StageCompany, StageResult } from './types.js';
+
+function makeAxiosError(status: number, retryAfter?: string): Error {
+  const err = new axios.AxiosError('Request failed', String(status));
+  err.response = {
+    status,
+    headers: retryAfter ? { 'retry-after': retryAfter } : {},
+    data: {},
+    statusText: String(status),
+    config: {} as InternalAxiosRequestConfig,
+  } as AxiosResponse;
+  return err;
+}
 
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -147,8 +160,8 @@ describe('runStage', () => {
     const companies = makeCompanies(2);
     const call = vi
       .fn()
-      .mockRejectedValueOnce(new Error('hiccup1'))
-      .mockRejectedValueOnce(new Error('hiccup2'))
+      .mockRejectedValueOnce(makeAxiosError(503))
+      .mockRejectedValueOnce(makeAxiosError(503))
       .mockResolvedValueOnce('raw');
     const parse = vi.fn().mockImplementation((_raw: string, batch: StageCompany[]) =>
       batch.map<StageResult<string>>((c) => ({ company: c, data: 'ok' }))
@@ -169,7 +182,7 @@ describe('runStage', () => {
 
   it('gives up after retry.tries exhausted and yields per-company error results', async () => {
     const companies = makeCompanies(2);
-    const call = vi.fn().mockRejectedValue(new Error('always-fails'));
+    const call = vi.fn().mockRejectedValue(makeAxiosError(500));
     const parse = vi.fn();
 
     const out = await runStage({
@@ -181,8 +194,32 @@ describe('runStage', () => {
       retry: { tries: 3, baseMs: 1 },
     });
     expect(call).toHaveBeenCalledTimes(3);
-    expect(out[0]!.error).toBe('always-fails');
-    expect(out[1]!.error).toBe('always-fails');
+    expect(out[0]!.error).toBeDefined();
+    expect(out[1]!.error).toBeDefined();
+  });
+
+  it('does not retry non-retryable 4xx errors', async () => {
+    const companies = makeCompanies(1);
+    const call = vi.fn().mockRejectedValue(makeAxiosError(400));
+    const parse = vi.fn();
+    const out = await runStage({ name: 's', companies, batchSize: 1, call, parse, retry: { tries: 3, baseMs: 1 } });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(out[0]!.error).toBeDefined();
+  });
+
+  it('retries on 429 and uses Retry-After header wait', async () => {
+    const companies = makeCompanies(1);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const call = vi
+      .fn()
+      .mockRejectedValueOnce(makeAxiosError(429, '1'))
+      .mockResolvedValueOnce('raw');
+    const parse = vi.fn().mockImplementation((_raw: string, batch: StageCompany[]) =>
+      batch.map<StageResult<string>>((c) => ({ company: c, data: 'ok' }))
+    );
+    const out = await runStage({ name: 's', companies, batchSize: 1, call, parse, retry: { tries: 3, baseMs: 1 } });
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(out[0]!.data).toBe('ok');
   });
 
   it('does not block other batches while one batch is retrying', async () => {

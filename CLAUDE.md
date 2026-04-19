@@ -10,7 +10,7 @@ CLI script that enriches the companies data (from a CSV) via Apify, Exa, TheirSt
 - apify-client — Apify actor runs
 - openai — Azure OpenAI SDK
 - csv-parse / csv-stringify — CSV I/O
-- bottleneck — token-bucket rate limiter (Exa QPS)
+- bottleneck — token-bucket rate limiter (Exa QPS, TheirStack QPS)
 - p-limit — concurrency limiter (Attio writes)
 - dotenv — env loading
 - vitest — unit tests
@@ -19,9 +19,9 @@ CLI script that enriches the companies data (from a CSV) via Apify, Exa, TheirSt
 ```
 src/
   index.ts          — CLI entry: registers all commands via commander
-  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY (single source of truth)
+  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, THEIRSTACK_QPS, THEIRSTACK_RETRY_* (single source of truth)
   types.ts          — EnrichableColumn, EnrichmentResult, InputRow, EnricherFn, AttioRecord
-  rateLimit.ts      — Bottleneck instance for Exa (QPS-paced) + p-limit for Attio writes and OpenAI calls; exports scheduleExa, attioWriteLimit, openaiLimit
+  rateLimit.ts      — Bottleneck instances for Exa and TheirStack (QPS-paced) + p-limit for Attio writes and OpenAI calls; exports scheduleExa, scheduleTheirstack, attioWriteLimit, openaiLimit
   pipeline.ts       — runPipeline (all columns) + runSingleEnricher (one column)
   csv.ts            — readInputCsv
   util.ts           — deriveDomain, nowIso, withRetry
@@ -46,16 +46,17 @@ src/
     filterSurvivors.ts  — apply gate, log passed/rejected/errored counts
     digitalNative.ts    — Stage 1: parser (structured JSON), gate, Attio formatter
     observabilityTool.ts — Stage 2: async parser (structured JSON), LinkedIn profile verification via Azure OpenAI judge(), gate (Datadog/Grafana/Prometheus allowlist), Attio formatter
+    communicationTool.ts — Stage 3: sync parser, two-step TheirStack search (Slack → Microsoft Teams), gate (reject if MS Teams), Attio formatter
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
 
 ## Concurrency & rate limits
-All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). Attio writes go through `attioWriteLimit` (default `p-limit(5)`). Azure OpenAI calls go through `openaiLimit` (default `p-limit(5)`).
+All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). All outbound TheirStack calls must go through `scheduleTheirstack()`, which enforces 300 RPM (free-plan ceiling) with safety headroom (default 4 QPS). Attio writes go through `attioWriteLimit` (default `p-limit(5)`). Azure OpenAI calls go through `openaiLimit` (default `p-limit(5)`).
 
-`runStage` fires all batches concurrently — back-pressure comes from the Exa limiter, not from sequential looping. Each batch:
-1. Calls `call()` (rate-limited by Bottleneck).
-2. Retries on failure with exponential backoff (`EXA_RETRY_TRIES` attempts, base `EXA_RETRY_BASE_MS`, factor 4 → 1s, 4s, 16s). Retries are per-batch and do not block other batches.
+`runStage` fires all batches concurrently — back-pressure comes from the relevant rate limiter, not from sequential looping. Each batch:
+1. Calls `call()` (rate-limited by Bottleneck or pLimit).
+2. Retries on failure with exponential backoff (configurable tries + base ms, factor 4 → 1s, 4s, 16s). Retries are per-batch and do not block other batches.
 3. On terminal failure, yields `{company, error}` results for that batch and moves on.
 4. `afterBatch` (usually Attio writes) fires as soon as the batch resolves, independently of other batches. afterBatch errors are logged and swallowed — they never abort the stage.
 
@@ -65,6 +66,9 @@ Tunables in `.env`:
 - `EXA_RETRY_BASE_MS` (default 1000)
 - `ATTIO_WRITE_CONCURRENCY` (default 5) — max in-flight Attio upserts
 - `OPENAI_CONCURRENCY` (default 5) — max concurrent Azure OpenAI calls (LinkedIn profile verification)
+- `THEIRSTACK_QPS` (default 4) — TheirStack calls per second (free plan = 300 RPM ≈ 5 QPS)
+- `THEIRSTACK_RETRY_TRIES` (default 3)
+- `THEIRSTACK_RETRY_BASE_MS` (default 1000)
 
 ## Stage-wise pipeline (enrich-all)
 
@@ -108,6 +112,17 @@ Reasoning: <Exa's reason text>
 LinkedIn profile URLs (`linkedin.com/in/*`) are verified via Azure OpenAI `judge()` against the full page text returned by Exa's `contents.text`. A tool is kept only if OpenAI returns `verdict: "yes"` (tool mentioned under the target company's experience block). All other source URLs (job postings, vendor pages, blogs) are accepted without verification. LinkedIn profiles not in `results[]` (no page text available) are dropped.
 If no evidence found: literal `No evidence found`.
 
+**Communication Tool** — single line with the tool found and its evidence URL:
+```
+Slack: <source_url>
+```
+or
+```
+Microsoft Teams: <source_url>
+```
+Stage 3 is per-company (batchSize: 1), not batch-of-2. The call makes two sequential TheirStack POST requests per company: first for `"slack"`, then for `"microsoft-teams"` only if Slack returned nothing. Companies with Slack evidence or no evidence continue; companies with only Microsoft Teams evidence are rejected by the gate.
+If no evidence found: literal `No evidence found`.
+
 ### Exa output schema
 Digital Native uses Exa's structured `outputSchema` (object with `companies[]`), not freeform text. Parser lives in `stages/digitalNative.ts` and reads `raw.output.content` as a parsed object. New Exa stages should follow the same pattern — prefer structured schemas over text parsing.
 
@@ -135,6 +150,7 @@ npm test
 - All env values read through `KEYS` (or the named exports) in `config.ts` — never access `process.env` directly elsewhere
 - Enrichers all have signature `(input: EnricherInput) => Promise<string>` — return `''` if unavailable
 - Outbound Exa calls must be wrapped in `scheduleExa(...)`; Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`)
+- Outbound TheirStack calls must be wrapped in `scheduleTheirstack(...)` — never call `theirstackJobsByTechnology` directly
 - No comments unless the WHY is non-obvious
 
 ## Testing
