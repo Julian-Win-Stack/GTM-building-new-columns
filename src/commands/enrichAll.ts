@@ -1,8 +1,8 @@
-import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS } from '../config.js';
+import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch } from '../apis/exa.js';
 import { theirstackJobsByTechnology } from '../apis/theirstack.js';
-import { scheduleExa, scheduleTheirstack } from '../rateLimit.js';
+import { scheduleExa, scheduleTheirstack, scheduleApollo } from '../rateLimit.js';
 import { deriveDomain } from '../util.js';
 import type { InputRow } from '../types.js';
 import type { StageCompany, StageResult } from '../stages/types.js';
@@ -45,7 +45,10 @@ import {
 import { parseFundingGrowthResponse, formatFundingGrowthForAttio } from '../stages/fundingGrowth.js';
 import { parseRevenueGrowthResponse, formatRevenueGrowthForAttio } from '../stages/revenueGrowth.js';
 import { parseNumberOfUsersResponse, formatNumberOfUsersForAttio } from '../stages/numberOfUsers.js';
-import { fetchAllRecords, FIELD_SLUGS } from '../apis/attio.js';
+import { apolloMixedPeopleApiSearch } from '../apis/apollo.js';
+import { parseNumberOfEngineersResponse, formatNumberOfEngineersForAttio, ENGINEER_TITLES } from '../stages/numberOfEngineers.js';
+import { fetchAllRecords, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
+import { attioWriteLimit } from '../rateLimit.js';
 
 export type EnrichAllOptions = {
   csv?: string;
@@ -73,6 +76,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const subset = opts.limit ? rows.slice(0, opts.limit) : rows;
 
   const companies: StageCompany[] = [];
+  const linkedinByDomain = new Map<string, string>();
   let skippedBadDomain = 0;
 
   for (const row of subset) {
@@ -84,6 +88,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       continue;
     }
     companies.push({ companyName: (row as InputRow)['Company Name'], domain });
+    const li = (row as InputRow)['Company Linkedin Url'];
+    if (li) linkedinByDomain.set(domain, li);
   }
 
   console.log(
@@ -93,6 +99,25 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   console.log(`[enrich-all] pre-fetching Attio records…`);
   const attioCache = await fetchAllRecords(companies.map((c) => c.domain));
   console.log(`[enrich-all] attio cache loaded (${attioCache.size} records found)`);
+
+  // Write LinkedIn URL for companies that don't yet have an Attio record
+  const newCompanies = companies.filter((c) => !attioCache.has(c.domain) && linkedinByDomain.has(c.domain));
+  if (newCompanies.length > 0 && !opts.dryRun) {
+    console.log(`[enrich-all] writing LinkedIn URL for ${newCompanies.length} new companies…`);
+    await Promise.all(
+      newCompanies.map((c) =>
+        attioWriteLimit(() =>
+          upsertCompanyByDomain({
+            'Company Name': c.companyName,
+            'Domain': c.domain,
+            'LinkedIn Page': linkedinByDomain.get(c.domain)!,
+          }).catch((err) => {
+            console.error(`[linkedin-preflight] failed for ${c.domain}: ${err instanceof Error ? err.message : String(err)}`);
+          })
+        )
+      )
+    );
+  }
 
   if (opts.dryRun) {
     const { todo: comp, done: compDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Competitor Tooling']!);
@@ -334,6 +359,32 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, { ...existing, [stage8Slug]: formatNumberOfUsersForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // Stage 9 — Number of Engineers (non-gating, data collection only)
+  const stage9Slug = FIELD_SLUGS['Number of Engineers']!;
+  const { todo: stage9Todo, done: stage9Done } = splitByCache(survivorsAfterStage5, attioCache, stage9Slug);
+  console.log(`[numberOfEngineers] todo=${stage9Todo.length} skipped=${stage9Done.length}`);
+
+  await runStage({
+    name: 'numberOfEngineers',
+    companies: stage9Todo,
+    batchSize: 1,
+    retry: { tries: APOLLO_RETRY_TRIES, baseMs: APOLLO_RETRY_BASE_MS },
+    call: (domains) => {
+      const domain = domains[0]!;
+      return scheduleApollo(() => apolloMixedPeopleApiSearch(domain, ENGINEER_TITLES));
+    },
+    parse: (raw, batch) => parseNumberOfEngineersResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Number of Engineers', batchResults, formatNumberOfEngineersForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage9Slug]: formatNumberOfEngineersForAttio(r.data) });
         }
       }
     },

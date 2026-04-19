@@ -19,9 +19,9 @@ CLI script that enriches the companies data (from a CSV) via Apify, Exa, TheirSt
 ```
 src/
   index.ts          — CLI entry: registers all commands via commander
-  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, THEIRSTACK_QPS, THEIRSTACK_RETRY_* (single source of truth)
+  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, THEIRSTACK_QPS, THEIRSTACK_RETRY_*, APOLLO_QPS, APOLLO_RETRY_* (single source of truth)
   types.ts          — EnrichableColumn, EnrichmentResult, InputRow, EnricherFn, AttioRecord
-  rateLimit.ts      — Bottleneck instances for Exa and TheirStack (QPS-paced) + p-limit for Attio writes and OpenAI calls; exports scheduleExa, scheduleTheirstack, attioWriteLimit, openaiLimit
+  rateLimit.ts      — Bottleneck instances for Exa, TheirStack, and Apollo (QPS-paced) + p-limit for Attio writes and OpenAI calls; exports scheduleExa, scheduleTheirstack, scheduleApollo, attioWriteLimit, openaiLimit
   pipeline.ts       — runPipeline (all columns) + runSingleEnricher (one column)
   csv.ts            — readInputCsv
   util.ts           — deriveDomain, nowIso, withRetry
@@ -35,6 +35,7 @@ src/
     apify.ts        — Apify actor helpers
     openai.ts       — Azure OpenAI wrapper
     theirstack.ts   — TheirStack API
+    apollo.ts       — Apollo REST API client: apolloMixedPeopleApiSearch (POST /mixed_people/api_search, reads total_entries)
   commands/
     enrichAll.ts    — stage-wise bulk enrichment: Stage 1 → write → filter → Stage 2 → …
     enrichCompany.ts — enrich one company by domain (row-wise, uses pipeline.ts)
@@ -52,12 +53,13 @@ src/
     fundingGrowth.ts    — Stage 6: parser (structured JSON), no gate, Attio formatter (Growth / Timeframe / Evidence multi-line)
     revenueGrowth.ts    — Stage 7: parser (structured JSON), no gate, Attio formatter (Growth / Evidence / Reasoning / Confidence multi-line)
     numberOfUsers.ts    — Stage 8: parser (structured JSON), no gate, Attio formatter (User count / Reasoning / Source link multi-line)
+    numberOfEngineers.ts — Stage 9: Apollo api_search parser, no gate, Attio formatter (plain integer string e.g. "47"); exports ENGINEER_TITLES
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
 
 ## Concurrency & rate limits
-All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). All outbound TheirStack calls must go through `scheduleTheirstack()`, which enforces 300 RPM (free-plan ceiling) with safety headroom (default 4 QPS). Attio writes go through `attioWriteLimit` (default `p-limit(5)`). Azure OpenAI calls go through `openaiLimit` (default `p-limit(5)`).
+All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). All outbound TheirStack calls must go through `scheduleTheirstack()`, which enforces 300 RPM (free-plan ceiling) with safety headroom (default 4 QPS). All outbound Apollo calls must go through `scheduleApollo()`, which enforces the plan's 200/min cap with safety headroom (default 3 QPS = 180/min). Apollo also has a 6000/hour cap — 429s from the hourly cap are handled by runStage retry-with-backoff. Attio writes go through `attioWriteLimit` (default `p-limit(5)`). Azure OpenAI calls go through `openaiLimit` (default `p-limit(5)`).
 
 `runStage` fires all batches concurrently — back-pressure comes from the relevant rate limiter, not from sequential looping. Each batch:
 1. Calls `call()` (rate-limited by Bottleneck or pLimit).
@@ -74,6 +76,9 @@ Tunables in `.env`:
 - `THEIRSTACK_QPS` (default 4) — TheirStack calls per second (free plan = 300 RPM ≈ 5 QPS)
 - `THEIRSTACK_RETRY_TRIES` (default 3)
 - `THEIRSTACK_RETRY_BASE_MS` (default 1000)
+- `APOLLO_QPS` (default 3) — Apollo calls per second (paid plan = 200/min = 3.33 QPS; hourly cap = 6000/hr)
+- `APOLLO_RETRY_TRIES` (default 3)
+- `APOLLO_RETRY_BASE_MS` (default 1000)
 
 ## Stage-wise pipeline (enrich-all)
 
@@ -97,7 +102,8 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 6 | Funding Growth | Exa | no gate — data collection only |
 | 7 | Revenue Growth | Exa | no gate — data collection only |
 | 8 | Number of Users | Exa | no gate — data collection only |
-| 9–16 | remaining columns | various | no gate — data collection only |
+| 9 | Number of Engineers | Apollo | no gate — data collection only |
+| 10–16 | remaining columns | various | no gate — data collection only |
 
 Stages 1–5 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing.
 
@@ -195,7 +201,11 @@ Source link: <source URL>
 ```
 If reasoning or source_link are empty, those lines are omitted.
 
-Stages 6–8 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
+**Number of Engineers** — plain integer as string (e.g. `47` or `0`). `0` is written when Apollo returns no matches — do not leave blank.
+
+**LinkedIn Page** — written once at pipeline start (pre-flight, before Stage 1) for companies that have no existing Attio record. Value comes directly from the `Company Linkedin Url` column in the input CSV. Not written for companies already in Attio.
+
+Stages 6–9 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
 
 ### Exa output schema
 All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue Growth, Number of Users) use Exa's `outputSchema` (object with `companies[]`), not freeform text. Parsers read `raw.output.content` as a parsed object. New Exa stages should follow the same pattern — prefer structured schemas over text parsing.
@@ -204,7 +214,8 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 - **Local match (no API)**: Competitor Tooling
 - **Exa (batch of 2)**: Digital Native, Observability Tool, Cloud Tool, Funding Growth, Revenue Growth, Number of Users
 - **TheirStack**: Communication Tool
-- **TBD**: Number of Engineers, Number of SREs, Engineer Hiring, SRE Hiring, Customer complains on X, Recent incidents ( Official ), AI adoption mindset, AI SRE maturity
+- **Apollo**: Number of Engineers
+- **TBD**: Number of SREs, Engineer Hiring, SRE Hiring, Customer complains on X, Recent incidents ( Official ), AI adoption mindset, AI SRE maturity
 
 ## Commands
 ```
@@ -226,6 +237,7 @@ npm test
 - Enrichers all have signature `(input: EnricherInput) => Promise<string>` — return `''` if unavailable
 - Outbound Exa calls must be wrapped in `scheduleExa(...)`; Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`)
 - Outbound TheirStack calls must be wrapped in `scheduleTheirstack(...)` — never call `theirstackJobsByTechnology` directly
+- Outbound Apollo calls must be wrapped in `scheduleApollo(...)` — never call `apolloMixedPeopleApiSearch` directly
 - No comments unless the WHY is non-obvious
 
 ## Testing

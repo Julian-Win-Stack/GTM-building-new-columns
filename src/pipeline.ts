@@ -26,6 +26,7 @@ export async function runPipeline(
   const result: EnrichmentResult = {
     'Company Name': row['Company Name'],
     'Domain': input.domain,
+    'LinkedIn Page': row['Company Linkedin Url'] ?? '',
     'Digital Native': values['Digital Native'] ?? '',
     'Cloud Tool': values['Cloud Tool'] ?? '',
     'Observability Tool': values['Observability Tool'] ?? '',

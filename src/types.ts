@@ -25,6 +25,7 @@ export type EnrichableColumn =
 export type EnrichmentResult = {
   'Company Name': string;
   'Domain': string;
+  'LinkedIn Page': string;
   'Digital Native': string;
   'Cloud Tool': string;
   'Observability Tool': string;

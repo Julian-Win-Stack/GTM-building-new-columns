@@ -5,6 +5,7 @@ import type { AttioRecord, EnrichmentResult } from '../types.js';
 export const FIELD_SLUGS: Record<string, string> = {
   'Company Name': 'company_name',
   'Domain': 'domain',
+  'LinkedIn Page': 'linkedin_page',
   'Digital Native': 'digital_native',
   'Cloud Tool': 'cloud_tool',
   'Observability Tool': 'observability_tool',

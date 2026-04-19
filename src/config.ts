@@ -19,6 +19,7 @@ export const KEYS = {
   azureOpenAIDeployment: process.env.AZURE_OPENAI_DEPLOYMENT ?? '',
   attio: process.env.ATTIO_API_KEY ?? '',
   attioObjectSlug: process.env.ATTIO_OBJECT_SLUG ?? 'ranked_companies',
+  apollo: process.env.APOLLO_API_KEY ?? '',
 } as const;
 
 export const CONCURRENCY = Number(process.env.CONCURRENCY ?? 3);
@@ -31,6 +32,9 @@ export const OPENAI_CONCURRENCY = Number(process.env.OPENAI_CONCURRENCY ?? 5);
 export const THEIRSTACK_QPS = Number(process.env.THEIRSTACK_QPS ?? 4);
 export const THEIRSTACK_RETRY_TRIES = Number(process.env.THEIRSTACK_RETRY_TRIES ?? 3);
 export const THEIRSTACK_RETRY_BASE_MS = Number(process.env.THEIRSTACK_RETRY_BASE_MS ?? 1000);
+export const APOLLO_QPS = Number(process.env.APOLLO_QPS ?? 3);
+export const APOLLO_RETRY_TRIES = Number(process.env.APOLLO_RETRY_TRIES ?? 3);
+export const APOLLO_RETRY_BASE_MS = Number(process.env.APOLLO_RETRY_BASE_MS ?? 1000);
 
 export const INPUT_COLUMNS = ['Company Name', 'Website', 'Company Linkedin Url'] as const;
 
