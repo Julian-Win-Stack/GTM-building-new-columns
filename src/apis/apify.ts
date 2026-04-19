@@ -3,16 +3,24 @@ import { KEYS } from '../config.js';
 
 const client = new ApifyClient({ token: KEYS.apify });
 
-export async function findPeopleLinkedInUrls(_company: string): Promise<unknown[]> {
-  // TODO: replace with the actual Apify actor id + input shape
-  // const run = await client.actor('<actor-id>').call({ ... });
-  // return (await client.dataset(run.defaultDatasetId).listItems()).items;
-  void client;
-  return [];
-}
+export type HarvestEmployeeItem = Record<string, unknown>;
+export type HarvestEmployeesResponse = { items: HarvestEmployeeItem[] };
 
-export async function fetchLinkedInPosts(_criteria: unknown): Promise<unknown[]> {
-  // TODO: replace with the actual Apify actor id + input shape
-  void client;
-  return [];
+export async function runHarvestLinkedInEmployees(
+  linkedinUrl: string,
+  jobTitles: string[]
+): Promise<HarvestEmployeesResponse> {
+  const run = await client.actor('harvestapi/linkedin-company-employees').call({
+    companies: [linkedinUrl],
+    excludeSeniorityLevelIds: ['310', '320'],
+    jobTitles,
+    maxItems: 20,
+    profileScraperMode: 'Short ($4 per 1k)',
+    recentlyChangedJobs: false,
+  });
+  if (run.statusMessage === 'rate limited') {
+    throw new Error('Apify/LinkedIn rate limit hit — cell left blank for retry on next run');
+  }
+  const { items } = await client.dataset(run.defaultDatasetId).listItems();
+  return { items: items as HarvestEmployeeItem[] };
 }

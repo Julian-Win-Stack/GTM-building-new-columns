@@ -35,6 +35,9 @@ export const THEIRSTACK_RETRY_BASE_MS = Number(process.env.THEIRSTACK_RETRY_BASE
 export const APOLLO_QPS = Number(process.env.APOLLO_QPS ?? 3);
 export const APOLLO_RETRY_TRIES = Number(process.env.APOLLO_RETRY_TRIES ?? 3);
 export const APOLLO_RETRY_BASE_MS = Number(process.env.APOLLO_RETRY_BASE_MS ?? 1000);
+export const APIFY_CONCURRENCY = Number(process.env.APIFY_CONCURRENCY ?? 10);
+export const APIFY_RETRY_TRIES = Number(process.env.APIFY_RETRY_TRIES ?? 3);
+export const APIFY_RETRY_BASE_MS = Number(process.env.APIFY_RETRY_BASE_MS ?? 2000);
 
 export const INPUT_COLUMNS = ['Company Name', 'Website', 'Company Linkedin Url'] as const;
 

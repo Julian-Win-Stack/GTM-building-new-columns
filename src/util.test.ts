@@ -1,5 +1,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { deriveDomain, nowIso, withRetry } from './util.js';
+import { normalizeLinkedInUrl, deriveDomain, nowIso, withRetry } from './util.js';
+
+describe('normalizeLinkedInUrl', () => {
+  it('upgrades http:// to https://', () => {
+    expect(normalizeLinkedInUrl('http://www.linkedin.com/company/acme')).toBe(
+      'https://www.linkedin.com/company/acme'
+    );
+  });
+
+  it('leaves https:// unchanged', () => {
+    expect(normalizeLinkedInUrl('https://www.linkedin.com/company/acme')).toBe(
+      'https://www.linkedin.com/company/acme'
+    );
+  });
+
+  it('prepends https:// to a bare URL with no scheme', () => {
+    expect(normalizeLinkedInUrl('www.linkedin.com/company/acme')).toBe(
+      'https://www.linkedin.com/company/acme'
+    );
+  });
+
+  it('returns empty string for empty input', () => {
+    expect(normalizeLinkedInUrl('')).toBe('');
+  });
+
+  it('trims whitespace before processing', () => {
+    expect(normalizeLinkedInUrl('  http://www.linkedin.com/company/acme  ')).toBe(
+      'https://www.linkedin.com/company/acme'
+    );
+  });
+});
 
 describe('deriveDomain', () => {
   it('strips the https scheme and returns the bare host', () => {

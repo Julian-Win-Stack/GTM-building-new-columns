@@ -19,12 +19,12 @@ CLI script that enriches the companies data (from a CSV) via Apify, Exa, TheirSt
 ```
 src/
   index.ts          — CLI entry: registers all commands via commander
-  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, THEIRSTACK_QPS, THEIRSTACK_RETRY_*, APOLLO_QPS, APOLLO_RETRY_* (single source of truth)
+  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, THEIRSTACK_QPS, THEIRSTACK_RETRY_*, APOLLO_QPS, APOLLO_RETRY_*, APIFY_CONCURRENCY, APIFY_RETRY_* (single source of truth)
   types.ts          — EnrichableColumn, EnrichmentResult, InputRow, EnricherFn, AttioRecord
-  rateLimit.ts      — Bottleneck instances for Exa, TheirStack, and Apollo (QPS-paced) + p-limit for Attio writes and OpenAI calls; exports scheduleExa, scheduleTheirstack, scheduleApollo, attioWriteLimit, openaiLimit
+  rateLimit.ts      — Bottleneck instances for Exa, TheirStack, and Apollo (QPS-paced) + p-limit for Attio writes, OpenAI calls, and Apify runs; exports scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, attioWriteLimit, openaiLimit
   pipeline.ts       — runPipeline (all columns) + runSingleEnricher (one column)
   csv.ts            — readInputCsv
-  util.ts           — deriveDomain, nowIso, withRetry
+  util.ts           — deriveDomain, nowIso, withRetry, normalizeLinkedInUrl
   cache.ts          — disk cache helpers
   filterSurvivors.ts — pipeline-level utility: apply gate to fresh results (filterSurvivors) + apply cacheGate to Attio-cached entries (filterCachedSurvivors)
   runStage.ts       — pipeline-level utility: generic stage runner with batching, concurrency, and retry
@@ -32,7 +32,7 @@ src/
   apis/
     attio.ts        — Attio REST client: find/create/update/upsertCompanyByDomain
 ****    exa.ts          — Exa search calls; ExaSearchResponse type; all Exa stage functions use structured JSON outputSchema + type:'deep-reasoning'
-    apify.ts        — Apify actor helpers
+    apify.ts        — Apify actor client: runHarvestLinkedInEmployees (harvestapi/linkedin-company-employees, run-sync via SDK)
     openai.ts       — Azure OpenAI wrapper
     theirstack.ts   — TheirStack API
     apollo.ts       — Apollo REST API client: apolloMixedPeopleApiSearch (POST /mixed_people/api_search, reads total_entries)
@@ -54,12 +54,13 @@ src/
     revenueGrowth.ts    — Stage 7: parser (structured JSON), no gate, Attio formatter (Growth / Evidence / Reasoning / Confidence multi-line)
     numberOfUsers.ts    — Stage 8: parser (structured JSON), no gate, Attio formatter (User count / Reasoning / Source link multi-line)
     numberOfEngineers.ts — Stage 9: Apollo api_search parser, no gate, Attio formatter (plain integer string e.g. "47"); exports ENGINEER_TITLES
+    numberOfSres.ts      — Stage 10: Apify harvestapi parser (counts items), no gate, Attio formatter (plain integer string e.g. "3", or "N/A" when no LinkedIn URL); exports SRE_TITLES
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
 
 ## Concurrency & rate limits
-All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). All outbound TheirStack calls must go through `scheduleTheirstack()`, which enforces 300 RPM (free-plan ceiling) with safety headroom (default 4 QPS). All outbound Apollo calls must go through `scheduleApollo()`, which enforces the plan's 200/min cap with safety headroom (default 3 QPS = 180/min). Apollo also has a 6000/hour cap — 429s from the hourly cap are handled by runStage retry-with-backoff. Attio writes go through `attioWriteLimit` (default `p-limit(5)`). Azure OpenAI calls go through `openaiLimit` (default `p-limit(5)`).
+All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). All outbound TheirStack calls must go through `scheduleTheirstack()`, which enforces 300 RPM (free-plan ceiling) with safety headroom (default 4 QPS). All outbound Apollo calls must go through `scheduleApollo()`, which enforces the plan's 200/min cap with safety headroom (default 3 QPS = 180/min). Apollo also has a 6000/hour cap — 429s from the hourly cap are handled by runStage retry-with-backoff. All outbound Apify calls must go through `scheduleApify()`, which enforces a concurrency cap (default `p-limit(10)`) — Apify run-sync calls are long-running (30s–2 min), so concurrency rather than QPS is the right shape. If the actor returns `statusMessage === 'rate limited'` (LinkedIn hourly cap hit), `runHarvestLinkedInEmployees` throws so `runStage` records an error and leaves the Attio cell blank — the company will be retried on the next run. Set `APIFY_CONCURRENCY` to your Apify plan's actor concurrency ceiling to maximise throughput. Attio writes go through `attioWriteLimit` (default `p-limit(5)`). Azure OpenAI calls go through `openaiLimit` (default `p-limit(5)`).
 
 `runStage` fires all batches concurrently — back-pressure comes from the relevant rate limiter, not from sequential looping. Each batch:
 1. Calls `call()` (rate-limited by Bottleneck or pLimit).
@@ -79,6 +80,9 @@ Tunables in `.env`:
 - `APOLLO_QPS` (default 3) — Apollo calls per second (paid plan = 200/min = 3.33 QPS; hourly cap = 6000/hr)
 - `APOLLO_RETRY_TRIES` (default 3)
 - `APOLLO_RETRY_BASE_MS` (default 1000)
+- `APIFY_CONCURRENCY` (default 10) — max concurrent Apify run-sync calls; set to match your Apify plan's actor concurrency limit (free=3, personal=10, team=25+)
+- `APIFY_RETRY_TRIES` (default 3)
+- `APIFY_RETRY_BASE_MS` (default 2000)
 
 ## Stage-wise pipeline (enrich-all)
 
@@ -103,7 +107,8 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 7 | Revenue Growth | Exa | no gate — data collection only |
 | 8 | Number of Users | Exa | no gate — data collection only |
 | 9 | Number of Engineers | Apollo | no gate — data collection only |
-| 10–16 | remaining columns | various | no gate — data collection only |
+| 10 | Number of SREs | Apify | no gate — data collection only |
+| 11–16 | remaining columns | various | no gate — data collection only |
 
 Stages 1–5 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing.
 
@@ -203,9 +208,19 @@ If reasoning or source_link are empty, those lines are omitted.
 
 **Number of Engineers** — plain integer as string (e.g. `47` or `0`). `0` is written when Apollo returns no matches — do not leave blank.
 
+**Number of SREs** — count on the first line, blank line, then one LinkedIn profile URL per line:
+```
+3
+
+https://linkedin.com/in/person1
+https://linkedin.com/in/person2
+https://linkedin.com/in/person3
+```
+Written as `N/A` when the company has no `Company Linkedin Url` in the CSV. Written as a plain integer (e.g. `0`) when Apify returns items with no `linkedinUrl` field. Cap is 20 (actor `maxItems: 20`). Titles searched: `["SRE", "Site Reliability", "Site Reliability Engineer"]`. Excluded seniority level IDs: `["310", "320"]`.
+
 **LinkedIn Page** — written once at pipeline start (pre-flight, before Stage 1) for companies that have no existing Attio record. Value comes directly from the `Company Linkedin Url` column in the input CSV. Not written for companies already in Attio.
 
-Stages 6–9 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
+Stages 6–10 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
 
 ### Exa output schema
 All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue Growth, Number of Users) use Exa's `outputSchema` (object with `companies[]`), not freeform text. Parsers read `raw.output.content` as a parsed object. New Exa stages should follow the same pattern — prefer structured schemas over text parsing.
@@ -215,7 +230,8 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 - **Exa (batch of 2)**: Digital Native, Observability Tool, Cloud Tool, Funding Growth, Revenue Growth, Number of Users
 - **TheirStack**: Communication Tool
 - **Apollo**: Number of Engineers
-- **TBD**: Number of SREs, Engineer Hiring, SRE Hiring, Customer complains on X, Recent incidents ( Official ), AI adoption mindset, AI SRE maturity
+- **Apify (harvestapi/linkedin-company-employees)**: Number of SREs
+- **TBD**: Engineer Hiring, SRE Hiring, Customer complains on X, Recent incidents ( Official ), AI adoption mindset, AI SRE maturity
 
 ## Commands
 ```
@@ -238,6 +254,7 @@ npm test
 - Outbound Exa calls must be wrapped in `scheduleExa(...)`; Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`)
 - Outbound TheirStack calls must be wrapped in `scheduleTheirstack(...)` — never call `theirstackJobsByTechnology` directly
 - Outbound Apollo calls must be wrapped in `scheduleApollo(...)` — never call `apolloMixedPeopleApiSearch` directly
+- Outbound Apify calls must be wrapped in `scheduleApify(...)` — never call `runHarvestLinkedInEmployees` directly
 - No comments unless the WHY is non-obvious
 
 ## Testing

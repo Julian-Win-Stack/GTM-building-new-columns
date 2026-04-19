@@ -1,9 +1,9 @@
-import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS } from '../config.js';
+import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch } from '../apis/exa.js';
 import { theirstackJobsByTechnology } from '../apis/theirstack.js';
-import { scheduleExa, scheduleTheirstack, scheduleApollo } from '../rateLimit.js';
-import { deriveDomain } from '../util.js';
+import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify } from '../rateLimit.js';
+import { deriveDomain, normalizeLinkedInUrl } from '../util.js';
 import type { InputRow } from '../types.js';
 import type { StageCompany, StageResult } from '../stages/types.js';
 import { runStage } from '../runStage.js';
@@ -47,6 +47,8 @@ import { parseRevenueGrowthResponse, formatRevenueGrowthForAttio } from '../stag
 import { parseNumberOfUsersResponse, formatNumberOfUsersForAttio } from '../stages/numberOfUsers.js';
 import { apolloMixedPeopleApiSearch } from '../apis/apollo.js';
 import { parseNumberOfEngineersResponse, formatNumberOfEngineersForAttio, ENGINEER_TITLES } from '../stages/numberOfEngineers.js';
+import { parseNumberOfSresResponse, formatNumberOfSresForAttio, SRE_TITLES, type NumberOfSresData } from '../stages/numberOfSres.js';
+import { runHarvestLinkedInEmployees, type HarvestEmployeesResponse } from '../apis/apify.js';
 import { fetchAllRecords, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
@@ -88,7 +90,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       continue;
     }
     companies.push({ companyName: (row as InputRow)['Company Name'], domain });
-    const li = (row as InputRow)['Company Linkedin Url'];
+    const li = normalizeLinkedInUrl((row as InputRow)['Company Linkedin Url'] ?? '');
     if (li) linkedinByDomain.set(domain, li);
   }
 
@@ -385,6 +387,49 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, { ...existing, [stage9Slug]: formatNumberOfEngineersForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // Stage 10 — Number of SREs (non-gating, data collection only)
+  const stage10Slug = FIELD_SLUGS['Number of SREs']!;
+  const { todo: stage10Todo, done: stage10Done } = splitByCache(survivorsAfterStage5, attioCache, stage10Slug);
+  console.log(`[numberOfSres] todo=${stage10Todo.length} skipped=${stage10Done.length}`);
+
+  const stage10NoLinkedIn = stage10Todo.filter((c) => !linkedinByDomain.has(c.domain));
+  const stage10HaveLinkedIn = stage10Todo.filter((c) => linkedinByDomain.has(c.domain));
+
+  if (stage10NoLinkedIn.length > 0) {
+    console.log(`[numberOfSres] writing N/A for ${stage10NoLinkedIn.length} companies missing LinkedIn URL`);
+    const naResults: { company: StageCompany; data: NumberOfSresData }[] = stage10NoLinkedIn.map((c) => ({
+      company: c,
+      data: { count: 0, linkedinUrls: [], na: true as const },
+    }));
+    await writeStageColumn('Number of SREs', naResults, formatNumberOfSresForAttio);
+    for (const r of naResults) {
+      const existing = attioCache.get(r.company.domain) ?? {};
+      attioCache.set(r.company.domain, { ...existing, [stage10Slug]: 'N/A' });
+    }
+  }
+
+  await runStage<HarvestEmployeesResponse, NumberOfSresData>({
+    name: 'numberOfSres',
+    companies: stage10HaveLinkedIn,
+    batchSize: 1,
+    retry: { tries: APIFY_RETRY_TRIES, baseMs: APIFY_RETRY_BASE_MS },
+    call: (domains) => {
+      const domain = domains[0]!;
+      const url = linkedinByDomain.get(domain)!;
+      return scheduleApify(() => runHarvestLinkedInEmployees(url, [...SRE_TITLES]));
+    },
+    parse: (raw, batch) => parseNumberOfSresResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Number of SREs', batchResults, formatNumberOfSresForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage10Slug]: formatNumberOfSresForAttio(r.data) });
         }
       }
     },

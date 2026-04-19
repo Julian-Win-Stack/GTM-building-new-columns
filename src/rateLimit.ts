@@ -1,6 +1,6 @@
 import Bottleneck from 'bottleneck';
 import pLimit from 'p-limit';
-import { EXA_QPS, THEIRSTACK_QPS, APOLLO_QPS, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY } from './config.js';
+import { EXA_QPS, THEIRSTACK_QPS, APOLLO_QPS, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, APIFY_CONCURRENCY } from './config.js';
 
 export const exaLimiter = new Bottleneck({
   reservoir: EXA_QPS,
@@ -36,4 +36,9 @@ export const apolloLimiter = new Bottleneck({
 
 export function scheduleApollo<T>(fn: () => Promise<T>): Promise<T> {
   return apolloLimiter.schedule(fn);
+}
+
+export const apifyLimit = pLimit(APIFY_CONCURRENCY);
+export function scheduleApify<T>(fn: () => Promise<T>): Promise<T> {
+  return apifyLimit(fn);
 }
