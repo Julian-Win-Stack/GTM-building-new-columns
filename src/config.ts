@@ -27,6 +27,7 @@ export const EXA_QPS = Number(process.env.EXA_QPS ?? 8);
 export const EXA_RETRY_TRIES = Number(process.env.EXA_RETRY_TRIES ?? 3);
 export const EXA_RETRY_BASE_MS = Number(process.env.EXA_RETRY_BASE_MS ?? 1000);
 export const ATTIO_WRITE_CONCURRENCY = Number(process.env.ATTIO_WRITE_CONCURRENCY ?? 5);
+export const OPENAI_CONCURRENCY = Number(process.env.OPENAI_CONCURRENCY ?? 5);
 
 export const INPUT_COLUMNS = ['Company Name', 'Website', 'Company Linkedin Url'] as const;
 

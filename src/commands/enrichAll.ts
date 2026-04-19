@@ -1,6 +1,6 @@
 import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
-import { digitalNativeExaSearch } from '../apis/exa.js';
+import { digitalNativeExaSearch, observabilityToolExaSearch } from '../apis/exa.js';
 import { scheduleExa } from '../rateLimit.js';
 import { deriveDomain } from '../util.js';
 import type { InputRow } from '../types.js';
@@ -13,6 +13,11 @@ import {
   digitalNativeGate,
   formatDigitalNativeForAttio,
 } from '../stages/digitalNative.js';
+import {
+  parseObservabilityToolResponse,
+  observabilityToolGate,
+  formatObservabilityToolForAttio,
+} from '../stages/observabilityTool.js';
 import { fetchAllRecords, FIELD_SLUGS } from '../apis/attio.js';
 
 export type EnrichAllOptions = {
@@ -63,12 +68,14 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   console.log(`[enrich-all] attio cache loaded (${attioCache.size} records found)`);
 
   if (opts.dryRun) {
-    const { todo, done } = splitByCache(companies, attioCache, FIELD_SLUGS['Digital Native']!);
-    console.log(`[dry] digital-native: todo=${todo.length} skipped=${done.length}`);
-    for (let i = 0; i < todo.length; i += 2) {
-      const batch = todo.slice(i, i + 2);
+    const { todo: dn, done: dnDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Digital Native']!);
+    console.log(`[dry] digital-native: todo=${dn.length} skipped=${dnDone.length}`);
+    for (let i = 0; i < dn.length; i += 2) {
+      const batch = dn.slice(i, i + 2);
       console.log(`[dry]   batch: ${batch.map((c) => c.domain).join(', ')}`);
     }
+    const { todo: obs, done: obsDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Observability Tool']!);
+    console.log(`[dry] observability-tool: todo=${obs.length} skipped=${obsDone.length}`);
     return;
   }
 
@@ -98,8 +105,34 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const stage1TodoSurvivors = filterSurvivors('digitalNative', stage1Results, digitalNativeGate);
   const survivors = [...stage1TodoSurvivors, ...stage1Done];
 
-  console.log(`\n[enrich-all] survivors (${survivors.length}):`);
-  for (const c of survivors) console.log(`  ${c.domain}  (${c.companyName})`);
+  // Stage 2 — Observability Tool
+  const stage2Slug = FIELD_SLUGS['Observability Tool']!;
+  const { todo: stage2Todo, done: stage2Done } = splitByCache(survivors, attioCache, stage2Slug);
+  console.log(`[observabilityTool] todo=${stage2Todo.length} skipped=${stage2Done.length}`);
 
-  console.log(`\n[done] total=${companies.length} survivors=${survivors.length} badDomains=${skippedBadDomain}`);
+  const stage2Results = await runStage({
+    name: 'observabilityTool',
+    companies: stage2Todo,
+    batchSize: 2,
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => scheduleExa(() => observabilityToolExaSearch(domains)),
+    parse: (raw, batch) => parseObservabilityToolResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Observability Tool', batchResults, formatObservabilityToolForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage2Slug]: formatObservabilityToolForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  const stage2TodoSurvivors = filterSurvivors('observabilityTool', stage2Results, observabilityToolGate);
+  const survivorsAfterStage2 = [...stage2TodoSurvivors, ...stage2Done];
+
+  console.log(`\n[enrich-all] survivors after stage 2 (${survivorsAfterStage2.length}):`);
+  for (const c of survivorsAfterStage2) console.log(`  ${c.domain}  (${c.companyName})`);
+
+  console.log(`\n[done] total=${companies.length} survivors=${survivorsAfterStage2.length} badDomains=${skippedBadDomain}`);
 }

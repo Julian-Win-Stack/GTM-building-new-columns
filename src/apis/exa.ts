@@ -8,6 +8,11 @@ export type DigitalNativeExaItem = {
   reason: string;
 };
 
+export type ObservabilityToolItem = { name: string; sourceUrl: string };
+export type ObservabilityToolPayload = {
+  companies: Array<{ domain: string; toolsText: string }>;
+};
+
 export type DigitalNativeExaPayload = {
   companies: DigitalNativeExaItem[];
 };
@@ -17,6 +22,7 @@ export type ExaSearchResponse = {
     id: string;
     url: string;
     title: string;
+    text?: string;
     highlights?: string[];
     highlightScores?: number[];
     publishedDate?: string;
@@ -135,5 +141,89 @@ export async function digitalNativeExaSearch(domains: string[]): Promise<ExaSear
     stream: false,
     systemPrompt: SYSTEM_PROMPT,
     type: 'deep-reasoning',
+  });
+}
+
+const SYSTEM_PROMPT_OBSERVABILITY = `Determine which of the following observability tools are used by each target company. Report evidence ONLY for tools on the ALLOWED TOOLS list below — do NOT report any other tools, platforms, or services.
+
+ALLOWED TOOLS (closed list — only these tools may be reported, spelled exactly as shown):
+- Datadog
+- Grafana
+- New Relic
+- Dynatrace
+- Chronosphere
+- Coralogix
+- Elastic (ELK)
+- Honeycomb
+- Sentry
+- Axiom
+- VictoriaMetrics
+- Kibana
+- Netdata
+- Perses
+- Prometheus
+
+Search strategy:
+- Check the official customer / case-study pages of vendors from the ALLOWED TOOLS list for the target company
+- Review job postings (software engineer, infrastructure, platform, SRE, backend, etc.) for mentions of tools from the ALLOWED TOOLS list
+- Look for technical blogs or engineering posts by the company or its employees
+- Search LinkedIn profiles and activity (posts/comments) of current employees for mentions of tools from the ALLOWED TOOLS list used in their daily work
+
+Rules:
+- Only report a tool if it is on the ALLOWED TOOLS list AND there is direct evidence with a source link — no guessing or inference
+- Do NOT include tools outside the ALLOWED TOOLS list, even if the company clearly uses them (e.g., Splunk, AppDynamics, AWS CloudWatch, Elasticsearch-without-ELK, in-house / proprietary tooling — all excluded)
+- Do NOT include in-house, custom, or proprietary tools
+- If no valid evidence for an ALLOWED TOOL is found for a company, return an empty toolsText "" for that company
+
+Source requirements:
+- Do NOT return any links ending in .html
+- Ignore all sources where the URL ends in .html
+
+LinkedIn-specific rules:
+- Ensure the observability tool is mentioned under the target company's experience block on the profile
+- Ignore mentions tied to other companies listed on the same profile
+
+For each input domain, return exactly one entry in companies[] with:
+- domain: the exact domain provided (lowercase, no www.)
+- toolsText: a newline-separated list where each line is formatted EXACTLY as "ToolName: SourceUrl" (one tool per line). ToolName MUST be one of the ALLOWED TOOLS above, spelled exactly as listed (e.g., "New Relic" with a space, "Elastic (ELK)" with parentheses). If no evidence is found, return an empty string "". Do NOT include any other text, headers, numbering, or bullet markers in toolsText — only "Name: URL" lines separated by "\n".
+
+Example toolsText for a company with two tools:
+Datadog: https://jobs.ashbyhq.com/example/abc
+Grafana: https://www.linkedin.com/in/someone
+
+Always include every requested domain in the companies array, even if toolsText is "".`;
+
+const OBSERVABILITY_TOOL_OBJECT_SCHEMA = {
+  type: 'object',
+  properties: {
+    companies: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string' },
+          toolsText: { type: 'string' },
+        },
+        required: ['domain', 'toolsText'],
+      },
+    },
+  },
+  required: ['companies'],
+} as const;
+
+export async function observabilityToolExaSearch(domains: string[]): Promise<ExaSearchResponse> {
+  if (domains.length === 0) throw new Error('observabilityToolExaSearch: need at least 1 domain');
+
+  const query = `What observability tools do these companies use?\n${domains.join('\n')}`;
+
+  return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
+    numResults: 10,
+    outputSchema: OBSERVABILITY_TOOL_OBJECT_SCHEMA,
+    stream: false,
+    systemPrompt: SYSTEM_PROMPT_OBSERVABILITY,
+    type: 'deep-reasoning',
+    contents: {
+      text: { maxCharacters: 100000 },
+    },
   });
 }

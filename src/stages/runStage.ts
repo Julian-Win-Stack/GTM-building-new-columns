@@ -5,7 +5,7 @@ type RunStageOptions<TRaw, TData> = {
   companies: StageCompany[];
   batchSize: number;
   call: (domains: string[]) => Promise<TRaw>;
-  parse: (raw: TRaw, batch: StageCompany[]) => StageResult<TData>[];
+  parse: (raw: TRaw, batch: StageCompany[]) => StageResult<TData>[] | Promise<StageResult<TData>[]>;
   afterBatch?: (batchResults: StageResult<TData>[]) => Promise<void>;
   retry?: { tries: number; baseMs: number };
 };
@@ -14,7 +14,7 @@ async function runOneBatch<TRaw, TData>(
   name: string,
   batch: StageCompany[],
   call: (domains: string[]) => Promise<TRaw>,
-  parse: (raw: TRaw, batch: StageCompany[]) => StageResult<TData>[],
+  parse: (raw: TRaw, batch: StageCompany[]) => StageResult<TData>[] | Promise<StageResult<TData>[]>,
   retry: { tries: number; baseMs: number }
 ): Promise<StageResult<TData>[]> {
   const domains = batch.map((c) => c.domain);

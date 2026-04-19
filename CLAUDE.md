@@ -19,9 +19,9 @@ CLI script that enriches the companies data (from a CSV) via Apify, Exa, TheirSt
 ```
 src/
   index.ts          — CLI entry: registers all commands via commander
-  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY (single source of truth)
+  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY (single source of truth)
   types.ts          — EnrichableColumn, EnrichmentResult, InputRow, EnricherFn, AttioRecord
-  rateLimit.ts      — Bottleneck instance for Exa (QPS-paced) + p-limit for Attio writes; exports scheduleExa + attioWriteLimit
+  rateLimit.ts      — Bottleneck instance for Exa (QPS-paced) + p-limit for Attio writes and OpenAI calls; exports scheduleExa, attioWriteLimit, openaiLimit
   pipeline.ts       — runPipeline (all columns) + runSingleEnricher (one column)
   csv.ts            — readInputCsv
   util.ts           — deriveDomain, nowIso, withRetry
@@ -45,12 +45,13 @@ src/
     writeStageColumn.ts — write one column to Attio for all successful stage results; bounded by attioWriteLimit; logs and swallows per-row failures
     filterSurvivors.ts  — apply gate, log passed/rejected/errored counts
     digitalNative.ts    — Stage 1: parser (structured JSON), gate, Attio formatter
+    observabilityTool.ts — Stage 2: async parser (structured JSON), LinkedIn profile verification via Azure OpenAI judge(), gate (Datadog/Grafana/Prometheus allowlist), Attio formatter
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
 
 ## Concurrency & rate limits
-All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). Attio writes go through `attioWriteLimit` (default `p-limit(5)`).
+All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). Attio writes go through `attioWriteLimit` (default `p-limit(5)`). Azure OpenAI calls go through `openaiLimit` (default `p-limit(5)`).
 
 `runStage` fires all batches concurrently — back-pressure comes from the Exa limiter, not from sequential looping. Each batch:
 1. Calls `call()` (rate-limited by Bottleneck).
@@ -63,6 +64,7 @@ Tunables in `.env`:
 - `EXA_RETRY_TRIES` (default 3)
 - `EXA_RETRY_BASE_MS` (default 1000)
 - `ATTIO_WRITE_CONCURRENCY` (default 5) — max in-flight Attio upserts
+- `OPENAI_CONCURRENCY` (default 5) — max concurrent Azure OpenAI calls (LinkedIn profile verification)
 
 ## Stage-wise pipeline (enrich-all)
 
@@ -87,14 +89,24 @@ Stages 1–5 are gating stages. Companies rejected at any gate are written to At
 
 ### Attio value format for Exa-based stages
 
-Multi-line string stored in the column cell (blank lines between sections):
+Format varies by column:
+
+**Digital Native** — multi-line string (blank lines between sections):
 ```
-<category or tool name returned by Exa>
+<category>
 
 Confidence: <High | Medium | Low>
 
 Reasoning: <Exa's reason text>
 ```
+
+**Observability Tool** — per-tool lines, one per found tool (no confidence/reasoning):
+```
+<Tool name>: <source URL>
+<Tool name>: <source URL>
+```
+LinkedIn profile URLs (`linkedin.com/in/*`) are verified via Azure OpenAI `judge()` against the full page text returned by Exa's `contents.text`. A tool is kept only if OpenAI returns `verdict: "yes"` (tool mentioned under the target company's experience block). All other source URLs (job postings, vendor pages, blogs) are accepted without verification. LinkedIn profiles not in `results[]` (no page text available) are dropped.
+If no evidence found: literal `No evidence found`.
 
 ### Exa output schema
 Digital Native uses Exa's structured `outputSchema` (object with `companies[]`), not freeform text. Parser lives in `stages/digitalNative.ts` and reads `raw.output.content` as a parsed object. New Exa stages should follow the same pattern — prefer structured schemas over text parsing.
