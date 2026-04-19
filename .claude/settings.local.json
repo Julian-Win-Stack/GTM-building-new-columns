@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run *)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+      "Skill(update-config)",
+      "Bash(git config *)",
+      "Bash(mkdir -p \"/Users/phyonyanwinn/Library/Mobile Documents/com~apple~CloudDocs/Project/ProJect/GTM building new columns script/.claude/plans\")",
+      "Bash(mv \"/Users/phyonyanwinn/.claude/plans/ok-i-will-go-abundant-frog.md\" \"/Users/phyonyanwinn/Library/Mobile Documents/com~apple~CloudDocs/Project/ProJect/GTM building new columns script/.claude/plans/\")",
+      "Bash(npm test *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "WebFetch(domain:docs.exa.ai)",
+      "WebFetch(domain:exa.ai)",
+      "WebSearch",
+      "WebFetch(domain:theirstack.com)",
+      "Bash(tsx -e ' *)",
+      "Bash(npx tsx -e ' *)",
+      "Bash(npx tsx *)"
+    ]
+  }
+}

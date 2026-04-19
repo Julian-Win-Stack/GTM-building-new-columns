@@ -58,7 +58,10 @@ CATEGORIES:
 KEY DISTINCTIONS (resolve ambiguity by applying these rules in order):
 
 Rule 1 — Is the core product digital?
-   If the company's primary value is delivered through physical goods, in-person services, or manual labor (even if supported by an app or website), classify as NOT Digital-native.
+   Ask: "Is the digital platform itself the product, or merely a supporting tool for an otherwise physical/traditional business?" 
+   Classify as NOT Digital-native ONLY IF the digital component is a supporting tool e.g., a restaurant using a reservation app, a gym using membership software).
+   Classify as Digital-native IF the company's core value proposition IS the digital platform — even if it coordinates physical goods or in-person services — provided the platform serves at least hundreds of active users and the business could not exist without its digital infrastructure (e.g., DoorDash, Uber, Airbnb). 
+   In these cases, the physical fulfillment is a downstream output of the platform, not the core product.
 
 Rule 2 — Who is the daily end-user of the software?
    If the business customer's own employees are the primary daily users of the platform (e.g., recruiters using a CRM, HR teams using an HRIS, finance teams using ERP), classify as B2B — not B2B2C.
