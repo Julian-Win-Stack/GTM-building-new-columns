@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { filterSurvivors } from './filterSurvivors.js';
-import type { StageResult } from './types.js';
+import { filterSurvivors, filterCachedSurvivors } from './filterSurvivors.js';
+import type { StageCompany, StageResult } from './stages/types.js';
 
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -60,5 +60,44 @@ describe('filterSurvivors', () => {
     expect(line).toContain('passed=1');
     expect(line).toContain('rejected=1');
     expect(line).toContain('errored=1');
+  });
+});
+
+describe('filterCachedSurvivors', () => {
+  const done: StageCompany[] = [
+    { companyName: 'A', domain: 'a.com' },
+    { companyName: 'B', domain: 'b.com' },
+    { companyName: 'C', domain: 'c.com' },
+  ];
+  const cache = new Map<string, Record<string, string>>([
+    ['a.com', { slug: 'pass' }],
+    ['b.com', { slug: 'fail' }],
+    ['c.com', { slug: 'pass' }],
+  ]);
+
+  it('returns only companies whose cached value passes the cache gate', () => {
+    const survivors = filterCachedSurvivors('s', done, cache, 'slug', (v) => v === 'pass');
+    expect(survivors.map((c) => c.domain)).toEqual(['a.com', 'c.com']);
+  });
+
+  it('rejects a company whose cache entry is missing for the slug', () => {
+    const partialCache = new Map<string, Record<string, string>>([['a.com', { slug: 'pass' }]]);
+    const survivors = filterCachedSurvivors('s', done, partialCache, 'slug', (v) => v === 'pass');
+    expect(survivors.map((c) => c.domain)).toEqual(['a.com']);
+  });
+
+  it('returns empty array when done list is empty', () => {
+    const survivors = filterCachedSurvivors('s', [], cache, 'slug', () => true);
+    expect(survivors).toEqual([]);
+  });
+
+  it('logs passed/rejected counts when done is non-empty', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    filterCachedSurvivors('myStage', done, cache, 'slug', (v) => v === 'pass');
+    const line = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(line).toContain('myStage');
+    expect(line).toContain('cached');
+    expect(line).toContain('passed=2');
+    expect(line).toContain('rejected=1');
   });
 });

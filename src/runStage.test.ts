@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
 import { runStage } from './runStage.js';
-import type { StageCompany, StageResult } from './types.js';
+import type { StageCompany, StageResult } from './stages/types.js';
 
 function makeAxiosError(status: number, retryAfter?: string): Error {
   const err = new axios.AxiosError('Request failed', String(status));

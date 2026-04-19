@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { StageResult } from './types.js';
+import type { StageResult } from './stages/types.js';
 
 const upsertMock = vi.fn();
 
-vi.mock('../apis/attio.js', () => ({
+vi.mock('./apis/attio.js', () => ({
   upsertCompanyByDomain: upsertMock,
 }));
 

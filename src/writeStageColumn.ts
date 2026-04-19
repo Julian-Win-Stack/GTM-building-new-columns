@@ -1,7 +1,7 @@
-import { upsertCompanyByDomain } from '../apis/attio.js';
-import { attioWriteLimit } from '../rateLimit.js';
-import type { EnrichableColumn } from '../types.js';
-import type { StageResult } from './types.js';
+import { upsertCompanyByDomain } from './apis/attio.js';
+import { attioWriteLimit } from './rateLimit.js';
+import type { EnrichableColumn } from './types.js';
+import type { StageResult } from './stages/types.js';
 
 export async function writeStageColumn<T>(
   column: EnrichableColumn,

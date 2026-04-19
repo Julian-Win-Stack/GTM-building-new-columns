@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { StageCompany, StageResult } from './types.js';
+import type { StageCompany, StageResult } from './stages/types.js';
 
 // Returns wait ms for retryable errors:
 //   - 429: Retry-After header (seconds) or 30s fallback

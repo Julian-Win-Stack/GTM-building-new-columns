@@ -26,9 +26,12 @@ src/
   csv.ts            — readInputCsv
   util.ts           — deriveDomain, nowIso, withRetry
   cache.ts          — disk cache helpers
+  filterSurvivors.ts — pipeline-level utility: apply gate to fresh results (filterSurvivors) + apply cacheGate to Attio-cached entries (filterCachedSurvivors)
+  runStage.ts       — pipeline-level utility: generic stage runner with batching, concurrency, and retry
+  writeStageColumn.ts — pipeline-level utility: write one column to Attio for all successful stage results
   apis/
     attio.ts        — Attio REST client: find/create/update/upsertCompanyByDomain
-    exa.ts          — Exa search calls; ExaSearchResponse type; digitalNativeExaSearch uses structured JSON output schema
+****    exa.ts          — Exa search calls; ExaSearchResponse type; all Exa stage functions use structured JSON outputSchema + type:'deep-reasoning'
     apify.ts        — Apify actor helpers
     openai.ts       — Azure OpenAI wrapper
     theirstack.ts   — TheirStack API
@@ -41,13 +44,14 @@ src/
     index.ts        — ENRICHERS map (EnrichableColumn → EnricherFn) + ENRICHABLE_COLUMN_LIST
   stages/
     types.ts        — StageCompany, StageResult<T>, GateRule<T>
-    runStage.ts     — generic stage runner: batches concurrent via Promise.all, per-batch retry with exponential backoff (1s→4s→16s), afterBatch fires as soon as each batch resolves
-    writeStageColumn.ts — write one column to Attio for all successful stage results; bounded by attioWriteLimit; logs and swallows per-row failures
-    filterSurvivors.ts  — apply gate, log passed/rejected/errored counts
     competitorTool.ts   — Stage 1: local company-name match against known customer lists, gate (reject if any match), Attio formatter (comma-joined tool names or "Not using any competitor tools")
     digitalNative.ts    — Stage 2: parser (structured JSON), gate, Attio formatter
     observabilityTool.ts — Stage 3: async parser (structured JSON), LinkedIn profile verification via Azure OpenAI judge(), gate (Datadog/Grafana/Prometheus allowlist), Attio formatter
     communicationTool.ts — Stage 4: sync parser, two-step TheirStack search (Slack → Microsoft Teams), gate (reject if MS Teams), Attio formatter
+    cloudTool.ts        — Stage 5: parser (structured JSON), gate (pass on AWS/GCP/Both/no-evidence; reject other clouds), Attio formatter (`<Tool>: <url>` or "No evidence found")
+    fundingGrowth.ts    — Stage 6: parser (structured JSON), no gate, Attio formatter (Growth / Timeframe / Evidence multi-line)
+    revenueGrowth.ts    — Stage 7: parser (structured JSON), no gate, Attio formatter (Growth / Evidence / Reasoning / Confidence multi-line)
+    numberOfUsers.ts    — Stage 8: parser (structured JSON), no gate, Attio formatter (User count / Reasoning / Source link multi-line)
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
@@ -79,6 +83,8 @@ Flow: load CSV → pre-fetch Attio records (so already-filled companies can be s
 
 No on-disk progress ledger. Resume semantics come from the Attio pre-fetch: on startup, any company whose target column is already populated is skipped for that stage.
 
+Cached Attio values must still pass the stage's gate — otherwise a company rejected on a prior run would resurface on re-run. Each gating stage exports a `<stage>CacheGate(cached: string): boolean` alongside its regular gate; `filterCachedSurvivors` (in `filterSurvivors.ts`) applies it to the `done` pool before merging into the survivor set. When editing a stage's formatter, update its cacheGate in the same change so they stay in sync.
+
 ### Stage order and gating rules
 
 | # | Column | API | Gate (pass condition) |
@@ -88,7 +94,10 @@ No on-disk progress ledger. Resume semantics come from the Attio pre-fetch: on s
 | 3 | Observability Tool | Exa | no tool evidence OR at least one of: Datadog, Grafana, Prometheus |
 | 4 | Communication Tool | TheirStack | no evidence OR uses Slack (reject if Microsoft Teams / Microsoft) |
 | 5 | Cloud Tool | Exa | no evidence OR uses AWS OR GCP |
-| 6–16 | remaining columns | various | no gate — data collection only |
+| 6 | Funding Growth | Exa | no gate — data collection only |
+| 7 | Revenue Growth | Exa | no gate — data collection only |
+| 8 | Number of Users | Exa | no gate — data collection only |
+| 9–16 | remaining columns | various | no gate — data collection only |
 
 Stages 1–5 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing.
 
@@ -126,6 +135,21 @@ Microsoft Teams: <source_url>
 Stage 4 is per-company (batchSize: 1), not batch-of-2. The call makes two sequential TheirStack POST requests per company: first for `"slack"`, then for `"microsoft-teams"` only if Slack returned nothing. Companies with Slack evidence or no evidence continue; companies with only Microsoft Teams evidence are rejected by the gate.
 If no evidence found: literal `No evidence found`.
 
+**Cloud Tool** — single line with the cloud vendor and its evidence URL:
+```
+AWS: <source_url>
+```
+or
+```
+GCP: <source_url>
+```
+or (both detected):
+```
+Both: <source_url>
+```
+Stage 5 is batch-of-2 (like Digital Native). Exa returns the actual vendor name from source evidence; `tool` is a free-form string (no enum constraint). Gate passes AWS / GCP / Both / no-evidence; rejects any other cloud (Azure, IBM Cloud, etc.).
+If no evidence found: literal `No evidence found`.
+
 **Competitor Tooling** — comma-joined competitor tool names when the CSV company matches a known customer list, or a literal string otherwise:
 ```
 Rootly
@@ -139,8 +163,42 @@ or (no match, passed):
 Not using any competitor tools
 ```
 
+**Funding Growth** — multi-line string (blank lines between sections):
+```
+Growth: <round and amount, e.g. "Series B, $50M">
+
+Timeframe: <date or period>
+
+Evidence: <source URL>
+```
+If timeframe or evidence are empty, those lines are omitted.
+
+**Revenue Growth** — multi-line string:
+```
+Growth: <trajectory, e.g. "Growing ~40% YoY (estimated)">
+
+Evidence: <source URL>
+
+Reasoning: <how the trajectory was determined>
+
+Confidence: <high | medium | low>
+```
+If evidence or reasoning are empty, those lines are omitted. Confidence is always present.
+
+**Number of Users** — multi-line string:
+```
+User count: <count, e.g. "10,000 customers" or "~500K MAU (estimate)">
+
+Reasoning: <how the count was determined>
+
+Source link: <source URL>
+```
+If reasoning or source_link are empty, those lines are omitted.
+
+Stages 6–8 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
+
 ### Exa output schema
-Digital Native uses Exa's structured `outputSchema` (object with `companies[]`), not freeform text. Parser lives in `stages/digitalNative.ts` and reads `raw.output.content` as a parsed object. New Exa stages should follow the same pattern — prefer structured schemas over text parsing.
+All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue Growth, Number of Users) use Exa's `outputSchema` (object with `companies[]`), not freeform text. Parsers read `raw.output.content` as a parsed object. New Exa stages should follow the same pattern — prefer structured schemas over text parsing.
 
 ### API mapping
 - **Local match (no API)**: Competitor Tooling
