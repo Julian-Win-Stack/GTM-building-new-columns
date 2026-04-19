@@ -80,3 +80,6 @@ export function formatCompetitorToolForAttio(d: CompetitorToolData): string {
   if (d.matchedTools.length === 0) return 'Not using any competitor tools';
   return d.matchedTools.join(', ');
 }
+
+export const competitorToolCacheGate = (cached: string): boolean =>
+  cached.trim() === 'Not using any competitor tools';

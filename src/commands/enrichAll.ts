@@ -1,28 +1,31 @@
 import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
-import { digitalNativeExaSearch, observabilityToolExaSearch } from '../apis/exa.js';
+import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch } from '../apis/exa.js';
 import { theirstackJobsByTechnology } from '../apis/theirstack.js';
 import { scheduleExa, scheduleTheirstack } from '../rateLimit.js';
 import { deriveDomain } from '../util.js';
 import type { InputRow } from '../types.js';
 import type { StageCompany, StageResult } from '../stages/types.js';
-import { runStage } from '../stages/runStage.js';
-import { writeStageColumn } from '../stages/writeStageColumn.js';
-import { filterSurvivors } from '../stages/filterSurvivors.js';
+import { runStage } from '../runStage.js';
+import { writeStageColumn } from '../writeStageColumn.js';
+import { filterSurvivors, filterCachedSurvivors } from '../filterSurvivors.js';
 import {
   parseDigitalNativeResponse,
   digitalNativeGate,
   formatDigitalNativeForAttio,
+  digitalNativeCacheGate,
 } from '../stages/digitalNative.js';
 import {
   parseObservabilityToolResponse,
   observabilityToolGate,
   formatObservabilityToolForAttio,
+  observabilityToolCacheGate,
 } from '../stages/observabilityTool.js';
 import {
   parseCommunicationToolResponse,
   communicationToolGate,
   formatCommunicationToolForAttio,
+  communicationToolCacheGate,
   type CommunicationToolRaw,
   type CommunicationToolData,
 } from '../stages/communicationTool.js';
@@ -30,8 +33,18 @@ import {
   matchCompetitorTools,
   competitorToolGate,
   formatCompetitorToolForAttio,
+  competitorToolCacheGate,
   type CompetitorToolData,
 } from '../stages/competitorTool.js';
+import {
+  parseCloudToolResponse,
+  cloudToolGate,
+  formatCloudToolForAttio,
+  cloudToolCacheGate,
+} from '../stages/cloudTool.js';
+import { parseFundingGrowthResponse, formatFundingGrowthForAttio } from '../stages/fundingGrowth.js';
+import { parseRevenueGrowthResponse, formatRevenueGrowthForAttio } from '../stages/revenueGrowth.js';
+import { parseNumberOfUsersResponse, formatNumberOfUsersForAttio } from '../stages/numberOfUsers.js';
 import { fetchAllRecords, FIELD_SLUGS } from '../apis/attio.js';
 
 export type EnrichAllOptions = {
@@ -94,6 +107,14 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     console.log(`[dry] observability-tool: todo=${obs.length} skipped=${obsDone.length}`);
     const { todo: comm, done: commDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Communication Tool']!);
     console.log(`[dry] communication-tool: todo=${comm.length} skipped=${commDone.length}`);
+    const { todo: cloud, done: cloudDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Cloud Tool']!);
+    console.log(`[dry] cloud-tool: todo=${cloud.length} skipped=${cloudDone.length}`);
+    const { todo: fg, done: fgDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Funding Growth']!);
+    console.log(`[dry] funding-growth: todo=${fg.length} skipped=${fgDone.length}`);
+    const { todo: rg, done: rgDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Revenue Growth']!);
+    console.log(`[dry] revenue-growth: todo=${rg.length} skipped=${rgDone.length}`);
+    const { todo: nou, done: nouDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Number of Users']!);
+    console.log(`[dry] number-of-users: todo=${nou.length} skipped=${nouDone.length}`);
     return;
   }
 
@@ -117,7 +138,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     }
   }
   const stage1TodoSurvivors = filterSurvivors('competitorTool', stage1Results, competitorToolGate);
-  const survivorsAfterStage1 = [...stage1TodoSurvivors, ...stage1Done];
+  const stage1DoneSurvivors = filterCachedSurvivors('competitorTool', stage1Done, attioCache, stage1Slug, competitorToolCacheGate);
+  const survivorsAfterStage1 = [...stage1TodoSurvivors, ...stage1DoneSurvivors];
 
   // Stage 2 — Digital Native
   const stage2Slug = FIELD_SLUGS['Digital Native']!;
@@ -143,7 +165,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   });
 
   const stage2TodoSurvivors = filterSurvivors('digitalNative', stage2Results, digitalNativeGate);
-  const survivorsAfterStage2 = [...stage2TodoSurvivors, ...stage2Done];
+  const stage2DoneSurvivors = filterCachedSurvivors('digitalNative', stage2Done, attioCache, stage2Slug, digitalNativeCacheGate);
+  const survivorsAfterStage2 = [...stage2TodoSurvivors, ...stage2DoneSurvivors];
 
   // Stage 3 — Observability Tool
   const stage3Slug = FIELD_SLUGS['Observability Tool']!;
@@ -169,7 +192,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   });
 
   const stage3TodoSurvivors = filterSurvivors('observabilityTool', stage3Results, observabilityToolGate);
-  const survivorsAfterStage3 = [...stage3TodoSurvivors, ...stage3Done];
+  const stage3DoneSurvivors = filterCachedSurvivors('observabilityTool', stage3Done, attioCache, stage3Slug, observabilityToolCacheGate);
+  const survivorsAfterStage3 = [...stage3TodoSurvivors, ...stage3DoneSurvivors];
 
   // Stage 4 — Communication Tool
   const stage4Slug = FIELD_SLUGS['Communication Tool']!;
@@ -213,10 +237,107 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   });
 
   const stage4TodoSurvivors = filterSurvivors('communicationTool', stage4Results, communicationToolGate);
-  const survivorsAfterStage4 = [...stage4TodoSurvivors, ...stage4Done];
+  const stage4DoneSurvivors = filterCachedSurvivors('communicationTool', stage4Done, attioCache, stage4Slug, communicationToolCacheGate);
+  const survivorsAfterStage4 = [...stage4TodoSurvivors, ...stage4DoneSurvivors];
 
-  console.log(`\n[enrich-all] survivors after stage 4 (${survivorsAfterStage4.length}):`);
-  for (const c of survivorsAfterStage4) console.log(`  ${c.domain}  (${c.companyName})`);
+  // Stage 5 — Cloud Tool
+  const stage5Slug = FIELD_SLUGS['Cloud Tool']!;
+  const { todo: stage5Todo, done: stage5Done } = splitByCache(survivorsAfterStage4, attioCache, stage5Slug);
+  console.log(`[cloudTool] todo=${stage5Todo.length} skipped=${stage5Done.length}`);
 
-  console.log(`\n[done] total=${companies.length} survivors=${survivorsAfterStage4.length} badDomains=${skippedBadDomain}`);
+  const stage5Results = await runStage({
+    name: 'cloudTool',
+    companies: stage5Todo,
+    batchSize: 2,
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => scheduleExa(() => cloudToolExaSearch(domains)),
+    parse: (raw, batch) => parseCloudToolResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Cloud Tool', batchResults, formatCloudToolForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage5Slug]: formatCloudToolForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  const stage5TodoSurvivors = filterSurvivors('cloudTool', stage5Results, cloudToolGate);
+  const stage5DoneSurvivors = filterCachedSurvivors('cloudTool', stage5Done, attioCache, stage5Slug, cloudToolCacheGate);
+  const survivorsAfterStage5 = [...stage5TodoSurvivors, ...stage5DoneSurvivors];
+
+  console.log(`\n[enrich-all] survivors after stage 5 (${survivorsAfterStage5.length}):`);
+  for (const c of survivorsAfterStage5) console.log(`  ${c.domain}  (${c.companyName})`);
+
+  // Stage 6 — Funding Growth (non-gating, data collection only)
+  const stage6Slug = FIELD_SLUGS['Funding Growth']!;
+  const { todo: stage6Todo, done: stage6Done } = splitByCache(survivorsAfterStage5, attioCache, stage6Slug);
+  console.log(`[fundingGrowth] todo=${stage6Todo.length} skipped=${stage6Done.length}`);
+
+  await runStage({
+    name: 'fundingGrowth',
+    companies: stage6Todo,
+    batchSize: 2,
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => scheduleExa(() => fundingGrowthExaSearch(domains)),
+    parse: (raw, batch) => parseFundingGrowthResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Funding Growth', batchResults, formatFundingGrowthForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage6Slug]: formatFundingGrowthForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // Stage 7 — Revenue Growth (non-gating, data collection only)
+  const stage7Slug = FIELD_SLUGS['Revenue Growth']!;
+  const { todo: stage7Todo, done: stage7Done } = splitByCache(survivorsAfterStage5, attioCache, stage7Slug);
+  console.log(`[revenueGrowth] todo=${stage7Todo.length} skipped=${stage7Done.length}`);
+
+  await runStage({
+    name: 'revenueGrowth',
+    companies: stage7Todo,
+    batchSize: 2,
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => scheduleExa(() => revenueGrowthExaSearch(domains)),
+    parse: (raw, batch) => parseRevenueGrowthResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Revenue Growth', batchResults, formatRevenueGrowthForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage7Slug]: formatRevenueGrowthForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // Stage 8 — Number of Users (non-gating, data collection only)
+  const stage8Slug = FIELD_SLUGS['Number of Users']!;
+  const { todo: stage8Todo, done: stage8Done } = splitByCache(survivorsAfterStage5, attioCache, stage8Slug);
+  console.log(`[numberOfUsers] todo=${stage8Todo.length} skipped=${stage8Done.length}`);
+
+  await runStage({
+    name: 'numberOfUsers',
+    companies: stage8Todo,
+    batchSize: 2,
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => scheduleExa(() => numberOfUsersExaSearch(domains)),
+    parse: (raw, batch) => parseNumberOfUsersResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Number of Users', batchResults, formatNumberOfUsersForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage8Slug]: formatNumberOfUsersForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  console.log(`\n[done] total=${companies.length} survivors=${survivorsAfterStage5.length} badDomains=${skippedBadDomain}`);
 }

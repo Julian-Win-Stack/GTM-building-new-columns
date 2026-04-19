@@ -67,8 +67,7 @@ export function parseDigitalNativeResponse(
     console.log(
       `[digitalNative] parse miss — expected=[${companies.map((c) => c.domain).join(', ')}] parsed=[${[...parsedMap.keys()].join(', ')}] missing=[${missing.join(', ')}]`
     );
-    console.log('[digitalNative] raw Exa output.content:');
-    console.log(typeof raw.output?.content === 'string' ? raw.output.content : JSON.stringify(raw.output?.content, null, 2));
+
   }
 
   return results;
@@ -80,3 +79,9 @@ export const digitalNativeGate: GateRule<DigitalNativeData> = (d) =>
 export function formatDigitalNativeForAttio(d: DigitalNativeData): string {
   return `${d.category}\n\nConfidence: ${d.confidence}\n\nReasoning: ${d.reason}`;
 }
+
+export const digitalNativeCacheGate = (cached: string): boolean => {
+  const firstLine = cached.split('\n')[0]?.trim() ?? '';
+  if (!firstLine) return false;
+  return firstLine !== 'NOT Digital-native';
+};

@@ -3,6 +3,7 @@ import {
   parseCommunicationToolResponse,
   communicationToolGate,
   formatCommunicationToolForAttio,
+  communicationToolCacheGate,
   type CommunicationToolRaw,
 } from './communicationTool.js';
 import type { StageCompany } from './types.js';
@@ -50,5 +51,27 @@ describe('formatCommunicationToolForAttio', () => {
 
   it('formats no-evidence as literal string', () => {
     expect(formatCommunicationToolForAttio({ tool: null, sourceUrl: null })).toBe('No evidence found');
+  });
+});
+
+describe('communicationToolCacheGate', () => {
+  it('passes Slack cached value', () => {
+    expect(communicationToolCacheGate('Slack: https://x.com')).toBe(true);
+  });
+
+  it('passes No evidence found', () => {
+    expect(communicationToolCacheGate('No evidence found')).toBe(true);
+  });
+
+  it('rejects Microsoft Teams cached value', () => {
+    expect(communicationToolCacheGate('Microsoft Teams: https://x.com')).toBe(false);
+  });
+
+  it('rejects Microsoft Teams case-insensitively', () => {
+    expect(communicationToolCacheGate('microsoft teams: https://x.com')).toBe(false);
+  });
+
+  it('rejects empty cached value', () => {
+    expect(communicationToolCacheGate('')).toBe(false);
   });
 });

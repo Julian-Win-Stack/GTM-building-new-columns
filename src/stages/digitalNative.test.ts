@@ -3,6 +3,7 @@ import {
   parseDigitalNativeResponse,
   digitalNativeGate,
   formatDigitalNativeForAttio,
+  digitalNativeCacheGate,
   type DigitalNativeData,
 } from './digitalNative.js';
 import type { ExaSearchResponse } from '../apis/exa.js';
@@ -224,5 +225,29 @@ describe('formatDigitalNativeForAttio', () => {
     expect(formatDigitalNativeForAttio(data)).toBe(
       'Digital-native B2C\n\nConfidence: High\n\nReasoning: Sells consumer apps.'
     );
+  });
+});
+
+describe('digitalNativeCacheGate', () => {
+  it('passes a B2C cached value', () => {
+    expect(
+      digitalNativeCacheGate('Digital-native B2C\n\nConfidence: High\n\nReasoning: x')
+    ).toBe(true);
+  });
+
+  it('passes a B2B cached value', () => {
+    expect(
+      digitalNativeCacheGate('Digital-native B2B\n\nConfidence: Medium\n\nReasoning: x')
+    ).toBe(true);
+  });
+
+  it('rejects a NOT Digital-native cached value', () => {
+    expect(
+      digitalNativeCacheGate('NOT Digital-native\n\nConfidence: High\n\nReasoning: x')
+    ).toBe(false);
+  });
+
+  it('rejects an empty cached value', () => {
+    expect(digitalNativeCacheGate('')).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import {
   parseObservabilityToolResponse,
   observabilityToolGate,
   formatObservabilityToolForAttio,
+  observabilityToolCacheGate,
   type ObservabilityToolData,
 } from './observabilityTool.js';
 import type { ExaSearchResponse } from '../apis/exa.js';
@@ -402,5 +403,31 @@ describe('formatObservabilityToolForAttio', () => {
       ],
     };
     expect(formatObservabilityToolForAttio(data)).toBe('Datadog: https://a.com\nGrafana: https://b.com');
+  });
+});
+
+describe('observabilityToolCacheGate', () => {
+  it('passes No evidence found', () => {
+    expect(observabilityToolCacheGate('No evidence found')).toBe(true);
+  });
+
+  it('passes when Datadog is among the cached tools', () => {
+    expect(observabilityToolCacheGate('Datadog: https://a.com\nChronosphere: https://b.com')).toBe(true);
+  });
+
+  it('passes when Grafana is among the cached tools', () => {
+    expect(observabilityToolCacheGate('Grafana: https://a.com')).toBe(true);
+  });
+
+  it('passes when Prometheus is among the cached tools', () => {
+    expect(observabilityToolCacheGate('Prometheus: https://a.com')).toBe(true);
+  });
+
+  it('rejects when only non-allowlisted tools are cached', () => {
+    expect(observabilityToolCacheGate('Chronosphere: https://a.com\nNew Relic: https://b.com')).toBe(false);
+  });
+
+  it('rejects empty cached value', () => {
+    expect(observabilityToolCacheGate('')).toBe(false);
   });
 });

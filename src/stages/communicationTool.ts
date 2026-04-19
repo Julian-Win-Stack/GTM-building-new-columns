@@ -29,3 +29,9 @@ export function formatCommunicationToolForAttio(d: CommunicationToolData): strin
   if (d.tool === null) return 'No evidence found';
   return `${d.tool}: ${d.sourceUrl ?? ''}`;
 }
+
+export const communicationToolCacheGate = (cached: string): boolean => {
+  const trimmed = cached.trim().toLowerCase();
+  if (!trimmed) return false;
+  return !trimmed.startsWith('microsoft teams');
+};

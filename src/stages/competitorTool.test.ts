@@ -3,6 +3,7 @@ import {
   matchCompetitorTools,
   competitorToolGate,
   formatCompetitorToolForAttio,
+  competitorToolCacheGate,
 } from './competitorTool.js';
 
 describe('matchCompetitorTools', () => {
@@ -58,5 +59,25 @@ describe('formatCompetitorToolForAttio', () => {
     expect(
       formatCompetitorToolForAttio({ matchedTools: ['Splunk On-Call', 'BigPanda'] })
     ).toBe('Splunk On-Call, BigPanda');
+  });
+});
+
+describe('competitorToolCacheGate', () => {
+  it('passes the "no match" sentinel', () => {
+    expect(competitorToolCacheGate('Not using any competitor tools')).toBe(true);
+  });
+
+  it('passes with surrounding whitespace', () => {
+    expect(competitorToolCacheGate('  Not using any competitor tools  ')).toBe(true);
+  });
+
+  it('rejects when a competitor tool is recorded', () => {
+    expect(competitorToolCacheGate('Resolve.ai')).toBe(false);
+    expect(competitorToolCacheGate('Rootly')).toBe(false);
+    expect(competitorToolCacheGate('Splunk On-Call, BigPanda')).toBe(false);
+  });
+
+  it('rejects empty cached value', () => {
+    expect(competitorToolCacheGate('')).toBe(false);
   });
 });

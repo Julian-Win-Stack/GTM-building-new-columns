@@ -226,8 +226,7 @@ export async function parseObservabilityToolResponse(
     console.log(
       `[observabilityTool] parse miss — expected=[${companies.map((c) => c.domain).join(', ')}] parsed=[${[...parsedMap.keys()].join(', ')}] missing=[${missing.join(', ')}]`
     );
-    console.log('[observabilityTool] raw Exa output.content:');
-    console.log(typeof raw.output?.content === 'string' ? raw.output.content : JSON.stringify(raw.output?.content, null, 2));
+
   }
 
   return results;
@@ -242,3 +241,15 @@ export function formatObservabilityToolForAttio(d: ObservabilityToolData): strin
   if (d.tools.length === 0) return 'No evidence found';
   return d.tools.map((t) => `${t.name}: ${t.sourceUrl}`).join('\n');
 }
+
+export const observabilityToolCacheGate = (cached: string): boolean => {
+  const trimmed = cached.trim();
+  if (!trimmed) return false;
+  if (trimmed === 'No evidence found') return true;
+  const toolNames = trimmed
+    .split('\n')
+    .map((line) => line.split(':')[0]?.trim().toLowerCase() ?? '')
+    .filter(Boolean);
+  if (toolNames.length === 0) return false;
+  return toolNames.some((name) => ALLOWLIST.has(name));
+};

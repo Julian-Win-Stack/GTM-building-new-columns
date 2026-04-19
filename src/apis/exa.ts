@@ -211,6 +211,76 @@ const OBSERVABILITY_TOOL_OBJECT_SCHEMA = {
   required: ['companies'],
 } as const;
 
+export type CloudToolExaItem = {
+  domain: string;
+  tool: string;
+  evidence: string;
+  confidence: string;
+};
+
+export type CloudToolExaPayload = { companies: CloudToolExaItem[] };
+
+const SYSTEM_PROMPT_CLOUD_TOOL = `Cloud Tool (AWS / GCP)
+You are a strict verification system.
+
+Determine whether the company uses AWS or GCP.
+
+Rules:
+- Only use explicit public evidence (engineering blogs, job postings, case studies, official docs, talks).
+- Do NOT infer from common patterns.
+- Mentions like "cloud", "microservices", or "Kubernetes" alone are NOT sufficient.
+
+Look for:
+- "AWS", "Amazon Web Services", "GCP", "Google Cloud"
+- Specific services (EC2, S3, Lambda, BigQuery, GKE, etc.)
+
+Give me the source link that states that the company is using that cloud tool.
+
+For each input company domain, return exactly one entry in companies[] with:
+- domain: the exact domain provided (lowercase, no www.)
+- tool: the exact cloud vendor name found in evidence (e.g. "AWS", "GCP", "Both" if evidence for both, "Azure", "IBM Cloud"). Use "No evidence found" when no public evidence exists.
+- evidence: the URL of the source that confirms the tool usage. Use "" when tool is "No evidence found".
+- confidence: "high", "medium", or "low".
+
+Always include every requested domain in the companies array, even if confidence is low.`;
+
+const CLOUD_TOOL_OBJECT_SCHEMA = {
+  type: 'object',
+  properties: {
+    companies: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string' },
+          tool: { type: 'string' },
+          evidence: { type: 'string' },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+        },
+        required: ['domain', 'tool', 'evidence', 'confidence'],
+      },
+    },
+  },
+  required: ['companies'],
+} as const;
+
+export async function cloudToolExaSearch(domains: string[]): Promise<ExaSearchResponse> {
+  if (domains.length === 0) throw new Error('cloudToolExaSearch: need at least 1 domain');
+
+  const query =
+    domains.length === 1
+      ? `Research for ${domains[0]}`
+      : `Research for ${domains.slice(0, -1).join(', ')} and ${domains[domains.length - 1]}`;
+
+  return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
+    numResults: 10,
+    outputSchema: CLOUD_TOOL_OBJECT_SCHEMA,
+    stream: false,
+    systemPrompt: SYSTEM_PROMPT_CLOUD_TOOL,
+    type: 'deep-reasoning',
+  });
+}
+
 export async function observabilityToolExaSearch(domains: string[]): Promise<ExaSearchResponse> {
   if (domains.length === 0) throw new Error('observabilityToolExaSearch: need at least 1 domain');
 
@@ -225,5 +295,178 @@ export async function observabilityToolExaSearch(domains: string[]): Promise<Exa
     contents: {
       text: { maxCharacters: 100000 },
     },
+  });
+}
+
+const SYSTEM_PROMPT_FUNDING_GROWTH = `Find the most recent funding round for the companies. Return the round series (e.g. Seed, Series A, Series B), the amount raised, the date it was announced, and the source URL. If the latest round is not clearly labeled by series, just return whatever the most recent fundraising event was. Ignore older rounds — only the latest one matters.
+
+Search thoroughly: Crunchbase, PitchBook, CB Insights, press releases, SEC filings, the company's own blog, and reputable business news. Most companies have at least one publicly reported funding event. Only fall back to the "no funding" sentinel if you have genuinely searched and found nothing.
+
+For each input company domain, return exactly one entry in companies[] with:
+- domain: the exact domain provided (lowercase, no www.)
+- growth: the round series and amount raised (e.g. "Series B, $50M" or "Seed, $2M"). If no funding information exists after a thorough search, return the literal string "No funding information found" — NEVER return an empty string.
+- timeframe: the date or period of the announcement (e.g. "March 2024" or "Q1 2024"). Return "" only when growth is "No funding information found".
+- evidence: the source URL of the announcement. Return "" only when growth is "No funding information found".
+
+Always include every requested domain in the companies array.`;
+
+const FUNDING_GROWTH_OBJECT_SCHEMA = {
+  type: 'object',
+  properties: {
+    companies: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string' },
+          growth: { type: 'string' },
+          timeframe: { type: 'string' },
+          evidence: { type: 'string' },
+        },
+        required: ['domain', 'growth', 'timeframe', 'evidence'],
+      },
+    },
+  },
+  required: ['companies'],
+} as const;
+
+export async function fundingGrowthExaSearch(domains: string[]): Promise<ExaSearchResponse> {
+  if (domains.length === 0) throw new Error('fundingGrowthExaSearch: need at least 1 domain');
+
+  const query =
+    domains.length === 1
+      ? `Research for ${domains[0]}`
+      : `Research for ${domains.slice(0, -1).join(', ')} and ${domains[domains.length - 1]}`;
+
+  return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
+    numResults: 10,
+    outputSchema: FUNDING_GROWTH_OBJECT_SCHEMA,
+    stream: false,
+    systemPrompt: SYSTEM_PROMPT_FUNDING_GROWTH,
+    type: 'deep-reasoning',
+  });
+}
+
+const SYSTEM_PROMPT_REVENUE_GROWTH = `Research the revenue growth of the companies over the last 12 months.
+First, look for direct revenue figures. Search for any officially reported or credibly cited revenue numbers — from earnings calls, press releases, SEC filings, founder interviews, analyst reports, or verified news. If you find revenue figures for at least two points in time within the last 12 months, calculate the growth rate and determine whether revenue is growing, stable, or declining, and by how much.
+If direct revenue figures are not available, infer the revenue trajectory only from these signals:
+* Headcount changes — sustained hiring suggests growth; layoffs or hiring freezes suggest decline or stagnation
+* Funding activity — valuation uplift in a new round suggests healthy revenue; down rounds or a long gap with no funding can signal trouble
+* Customer or user count growth — if the user base is measurably growing, revenue is likely following
+* Web traffic trends — sustained traffic growth or decline from SimilarWeb or similar sources
+* Third-party revenue estimates — from CB Insights, PitchBook, Bloomberg Second Measure, or similar research firms
+Then classify the revenue trajectory as one of the following:
+* Growing — revenue is increasing, state by how much (% or absolute if known)
+* Stable — revenue is flat with no significant movement
+* Declining — revenue is decreasing, state by how much (% or absolute if known)
+* Uncertain — insufficient data to determine direction, but list all signals found
+For every data point, include the source URL and date. Prioritize sources from the last 12 months only. If older data is the only thing available, flag it clearly.
+
+For each input company domain, return exactly one entry in companies[] with:
+- domain: the exact domain provided (lowercase, no www.)
+- growth: the revenue trajectory (e.g. "Growing ~40% YoY (estimated)" or "Not publicly confirmed")
+- evidence: the source URL of the most relevant data point
+- reasoning: how you determined the revenue trajectory
+- confidence: "high", "medium", or "low"
+
+Always include every requested domain in the companies array, even if no data is available.`;
+
+const REVENUE_GROWTH_OBJECT_SCHEMA = {
+  type: 'object',
+  properties: {
+    companies: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string' },
+          growth: { type: 'string' },
+          evidence: { type: 'string' },
+          reasoning: { type: 'string' },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+        },
+        required: ['domain', 'growth', 'evidence', 'reasoning', 'confidence'],
+      },
+    },
+  },
+  required: ['companies'],
+} as const;
+
+export async function revenueGrowthExaSearch(domains: string[]): Promise<ExaSearchResponse> {
+  if (domains.length === 0) throw new Error('revenueGrowthExaSearch: need at least 1 domain');
+
+  const query =
+    domains.length === 1
+      ? `Research for ${domains[0]}`
+      : `Research for ${domains.slice(0, -1).join(', ')} and ${domains[domains.length - 1]}`;
+
+  return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
+    numResults: 10,
+    outputSchema: REVENUE_GROWTH_OBJECT_SCHEMA,
+    stream: false,
+    systemPrompt: SYSTEM_PROMPT_REVENUE_GROWTH,
+    type: 'deep-reasoning',
+  });
+}
+
+const SYSTEM_PROMPT_NUMBER_OF_USERS = `Research the total number of users, customers, or accounts for the companies.
+First, look for an exact count. Search official sources: press releases, blog posts, earnings calls, SEC filings, founder interviews, and verified news articles. If an exact number is found, record it along with what the company calls it (e.g. "monthly active users", "paying customers", "registered accounts"), the date it refers to, and the source URL.
+If no exact count is publicly available, gather every one of the following proxy signals that exists:
+Annual Recurring Revenue (ARR), MRR, or total revenue — with year
+Pricing tiers and their costs (free, pro, enterprise, per-seat pricing)
+Total funding raised and latest valuation
+Employee headcount and any stated growth rate
+App store download counts, DAU/MAU figures, or store rankings
+Number of paying vs. free users, if ever distinguished
+Geographic markets or number of countries served
+Number of enterprise clients vs. individual/SMB users
+Year-over-year or month-over-month growth rate percentages
+Any third-party estimates from analysts, research firms, or data providers (SimilarWeb, data.ai, CB Insights, PitchBook, G2, etc.)
+
+Search across: the company's official blog, press releases, Crunchbase, LinkedIn, SimilarWeb, App Annie/data.ai, G2, Trustpilot, CB Insights, PitchBook, earnings call transcripts, and industry news.
+For every data point, include the source URL and publication date. Always prefer the most recent data available. Note any caveats — for example, if the company has a stated policy of not disclosing user numbers, or if conflicting figures appear across sources.
+
+For each input company domain, return exactly one entry in companies[] with:
+- domain: the exact domain provided (lowercase, no www.)
+- user_count: the user count (e.g. "10,000 customers" or "~500K MAU (estimate)" or "Not publicly disclosed")
+- reasoning: how you determined the user count, including any proxy signals used
+- source_link: the URL of the most relevant source
+
+Always include every requested domain in the companies array, even if no data is available.`;
+
+const NUMBER_OF_USERS_OBJECT_SCHEMA = {
+  type: 'object',
+  properties: {
+    companies: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string' },
+          user_count: { type: 'string' },
+          reasoning: { type: 'string' },
+          source_link: { type: 'string' },
+        },
+        required: ['domain', 'user_count', 'reasoning', 'source_link'],
+      },
+    },
+  },
+  required: ['companies'],
+} as const;
+
+export async function numberOfUsersExaSearch(domains: string[]): Promise<ExaSearchResponse> {
+  if (domains.length === 0) throw new Error('numberOfUsersExaSearch: need at least 1 domain');
+
+  const query =
+    domains.length === 1
+      ? `Research for ${domains[0]}`
+      : `Research for ${domains.slice(0, -1).join(', ')} and ${domains[domains.length - 1]}`;
+
+  return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
+    numResults: 10,
+    outputSchema: NUMBER_OF_USERS_OBJECT_SCHEMA,
+    stream: false,
+    systemPrompt: SYSTEM_PROMPT_NUMBER_OF_USERS,
+    type: 'deep-reasoning',
   });
 }
