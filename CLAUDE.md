@@ -19,9 +19,9 @@ CLI script that enriches the companies data (from a CSV) via Apify, Exa, TheirSt
 ```
 src/
   index.ts          — CLI entry: registers all commands via commander
-  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, THEIRSTACK_QPS, THEIRSTACK_RETRY_*, APOLLO_QPS, APOLLO_RETRY_*, APIFY_CONCURRENCY, APIFY_RETRY_* (single source of truth)
+  config.ts         — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, EXA_QPS, EXA_RETRY_*, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, THEIRSTACK_QPS, THEIRSTACK_RETRY_*, APOLLO_QPS, APOLLO_RETRY_*, APIFY_CONCURRENCY, APIFY_RETRY_*, TWITTER_API_QPS, TWITTER_API_RETRY_* (single source of truth)
   types.ts          — EnrichableColumn, EnrichmentResult, InputRow, EnricherFn, AttioRecord
-  rateLimit.ts      — Bottleneck instances for Exa, TheirStack, and Apollo (QPS-paced) + p-limit for Attio writes, OpenAI calls, and Apify runs; exports scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, attioWriteLimit, openaiLimit
+  rateLimit.ts      — Bottleneck instances for Exa, TheirStack, Apollo, and twitterapi.io (QPS-paced) + p-limit for Attio writes, OpenAI calls, and Apify runs; exports scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi, attioWriteLimit, openaiLimit
   pipeline.ts       — runPipeline (all columns) + runSingleEnricher (one column)
   csv.ts            — readInputCsv
   util.ts           — deriveDomain, nowIso, withRetry, normalizeLinkedInUrl
@@ -36,6 +36,7 @@ src/
     openai.ts       — Azure OpenAI wrapper
     theirstack.ts   — TheirStack API
     apollo.ts       — Apollo REST API client: apolloMixedPeopleApiSearch (POST /mixed_people/api_search, reads total_entries)
+    twitterapi.ts   — twitterapi.io client: twitterAdvancedSearch (GET /twitter/tweet/advanced_search); fetchComplaintTweets (paginated, caps at 50 tweets, since_time=90 days ago)
   commands/
     enrichAll.ts    — stage-wise bulk enrichment: Stage 1 → write → filter → Stage 2 → …
     enrichCompany.ts — enrich one company by domain (row-wise, uses pipeline.ts)
@@ -56,6 +57,7 @@ src/
     numberOfEngineers.ts — Stage 9: Apollo api_search parser, no gate, Attio formatter (plain integer string e.g. "47"); exports ENGINEER_TITLES
     numberOfSres.ts      — Stage 10: Apify harvestapi parser (counts items), no gate, Attio formatter (plain integer string e.g. "3", or "N/A" when no LinkedIn URL); exports SRE_TITLES
     engineerHiring.ts    — Stage 11+12: Apify career-site-job-listing-feed parser (one call → two columns), no gate, Attio formatters for Engineer Hiring and SRE Hiring; exports ENGINEER_HIRING_TITLE_SEARCH, ENGINEER_HIRING_TITLE_EXCLUSIONS
+    customerComplaintsOnX.ts — Stage 13: twitterapi.io complaint tweets + Azure OpenAI classifier (4 buckets), no gate, Attio formatter (4-line count string)
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
@@ -84,6 +86,9 @@ Tunables in `.env`:
 - `APIFY_CONCURRENCY` (default 10) — max concurrent Apify run-sync calls; set to match your Apify plan's actor concurrency limit (free=3, personal=10, team=25+)
 - `APIFY_RETRY_TRIES` (default 3)
 - `APIFY_RETRY_BASE_MS` (default 2000)
+- `TWITTER_API_QPS` (default 50) — twitterapi.io calls per second (provider allows 1000+ RPS)
+- `TWITTER_API_RETRY_TRIES` (default 3)
+- `TWITTER_API_RETRY_BASE_MS` (default 1000)
 
 ## Stage-wise pipeline (enrich-all)
 
@@ -111,7 +116,8 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 10 | Number of SREs | Apify | no gate — data collection only |
 | 11 | Engineer Hiring | Apify | no gate — data collection only |
 | 12 | SRE Hiring | Apify (same call as Stage 11) | no gate — data collection only |
-| 13–16 | remaining columns | various | no gate — data collection only |
+| 13 | Customer complains on X | twitterapi.io + Azure OpenAI | no gate — data collection only |
+| 14–16 | remaining columns | various | no gate — data collection only |
 
 Stages 1–5 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing.
 
@@ -189,25 +195,31 @@ If timeframe or evidence are empty, those lines are omitted.
 
 **Revenue Growth** — multi-line string:
 ```
-Growth: <trajectory, e.g. "Growing ~40% YoY (estimated)">
+Growth: <revenue + trajectory, e.g. "~$15M ARR (estimated), growing ~40% YoY">
 
 Evidence: <source URL>
 
-Reasoning: <how the trajectory was determined>
+Source date: <ISO date or month/quarter/year, e.g. "2024-03-15" or "Q1 2024">
+
+Reasoning: <signals used and the math when inferred>
 
 Confidence: <high | medium | low>
 ```
-If evidence or reasoning are empty, those lines are omitted. Confidence is always present.
+If evidence, source date, or reasoning are empty, those lines are omitted. Confidence is always present. Exa is required to infer a numeric revenue + growth-rate estimate from proxy signals (headcount × revenue-per-employee benchmarks, funding stage, customer count × ACV, web traffic) when exact figures are unavailable — `"Insufficient data"` is reserved for the rare case of zero usable signals.
 
 **Number of Users** — multi-line string:
 ```
-User count: <count, e.g. "10,000 customers" or "~500K MAU (estimate)">
+User count: <count, e.g. "10,000 customers" or "~500K MAU (estimated)">
 
-Reasoning: <how the count was determined>
+Reasoning: <how the count was determined, including math when inferred>
 
 Source link: <source URL>
+
+Source date: <ISO date or month/quarter/year, e.g. "2024-03-15" or "Q1 2024">
+
+Confidence: <high | medium | low>
 ```
-If reasoning or source_link are empty, those lines are omitted.
+If reasoning, source_link, or source_date are empty, those lines are omitted. Confidence is always present. Exa is required to infer a numeric estimate from proxy signals (ARR ÷ ACV, headcount, traffic, app downloads, funding stage) when no exact count is publicly disclosed — `"Insufficient data"` is reserved for the rare case of zero usable signals.
 
 **Number of Engineers** — plain integer as string (e.g. `47` or `0`). `0` is written when Apollo returns no matches — do not leave blank.
 
@@ -240,9 +252,18 @@ Sr. SRE: https://acme.com/jobs/3
 ```
 Written as `0` when no items match the SRE keywords. Derived from the same Apify response as Engineer Hiring — no second API call.
 
+**Customer complains on X** — four lines, always present (even for zeros):
+```
+Full outage: X
+Partial outage: X
+Performance degradation: X
+Unclear: X
+```
+Tweets fetched via twitterapi.io GET `/twitter/tweet/advanced_search` (query: `@<domain-sld> OR <domain> OR "<Company Name>")` + complaint keywords + `since_time=90 days ago`). Paginated until 50 tweets accumulated or `has_next_page=false`. Truncated to 50 before the single OpenAI classification call. Zero counts written when no tweets found.
+
 **LinkedIn Page** — written once at pipeline start (pre-flight, before Stage 1) for companies that have no existing Attio record. Value comes directly from the `Company Linkedin Url` column in the input CSV. Not written for companies already in Attio.
 
-Stages 6–12 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
+Stages 6–13 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
 
 Stages 11 and 12 share a single `runStage` invocation (one Apify call per company) whose `afterBatch` writes both Engineer Hiring and SRE Hiring columns. Cache-skip requires both slugs to be non-empty; either blank triggers a fresh call.
 
@@ -256,7 +277,8 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 - **Apollo**: Number of Engineers
 - **Apify (harvestapi/linkedin-company-employees)**: Number of SREs
 - **Apify (fantastic-jobs/career-site-job-listing-feed)**: Engineer Hiring, SRE Hiring (single call per company feeds both columns)
-- **TBD**: Customer complains on X, Recent incidents ( Official ), AI adoption mindset, AI SRE maturity
+- **twitterapi.io + Azure OpenAI**: Customer complains on X (paginated tweet fetch → OpenAI 4-bucket classifier)
+- **TBD**: Recent incidents ( Official ), AI adoption mindset, AI SRE maturity
 
 ## Commands
 ```
@@ -280,6 +302,7 @@ npm test
 - Outbound TheirStack calls must be wrapped in `scheduleTheirstack(...)` — never call `theirstackJobsByTechnology` directly
 - Outbound Apollo calls must be wrapped in `scheduleApollo(...)` — never call `apolloMixedPeopleApiSearch` directly
 - Outbound Apify calls must be wrapped in `scheduleApify(...)` — never call `runHarvestLinkedInEmployees` or `runCareerSiteJobListings` directly
+- Outbound twitterapi.io calls must be wrapped in `scheduleTwitterApi(...)` — never call `twitterAdvancedSearch` or `fetchComplaintTweets` directly
 - No comments unless the WHY is non-obvious
 
 ## Testing

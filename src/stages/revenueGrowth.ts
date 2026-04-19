@@ -4,6 +4,7 @@ import type { StageCompany, StageResult } from './types.js';
 export type RevenueGrowthData = {
   growth: string;
   evidence: string;
+  source_date: string;
   reasoning: string;
   confidence: 'high' | 'medium' | 'low';
 };
@@ -34,12 +35,14 @@ export function parseRevenueGrowthResponse(
     const domainRaw = typeof rec['domain'] === 'string' ? rec['domain'] : '';
     const growth = typeof rec['growth'] === 'string' ? rec['growth'] : '';
     const evidence = typeof rec['evidence'] === 'string' ? rec['evidence'] : '';
+    const source_date = typeof rec['source_date'] === 'string' ? rec['source_date'] : '';
     const reasoning = typeof rec['reasoning'] === 'string' ? rec['reasoning'] : '';
     const confidenceRaw = typeof rec['confidence'] === 'string' ? rec['confidence'].toLowerCase() : '';
     if (!domainRaw || !growth || !VALID_CONFIDENCE.has(confidenceRaw)) continue;
     parsedMap.set(normalizeDomain(domainRaw), {
       growth,
       evidence,
+      source_date,
       reasoning,
       confidence: confidenceRaw as RevenueGrowthData['confidence'],
     });
@@ -65,6 +68,7 @@ export function parseRevenueGrowthResponse(
 export function formatRevenueGrowthForAttio(d: RevenueGrowthData): string {
   const parts = [`Growth: ${d.growth}`];
   if (d.evidence) parts.push(`Evidence: ${d.evidence}`);
+  if (d.source_date) parts.push(`Source date: ${d.source_date}`);
   if (d.reasoning) parts.push(`Reasoning: ${d.reasoning}`);
   parts.push(`Confidence: ${d.confidence}`);
   return parts.join('\n\n');

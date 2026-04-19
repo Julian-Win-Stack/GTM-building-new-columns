@@ -350,29 +350,57 @@ export async function fundingGrowthExaSearch(domains: string[]): Promise<ExaSear
   });
 }
 
-const SYSTEM_PROMPT_REVENUE_GROWTH = `Research the revenue growth of the companies over the last 12 months.
-First, look for direct revenue figures. Search for any officially reported or credibly cited revenue numbers — from earnings calls, press releases, SEC filings, founder interviews, analyst reports, or verified news. If you find revenue figures for at least two points in time within the last 12 months, calculate the growth rate and determine whether revenue is growing, stable, or declining, and by how much.
-If direct revenue figures are not available, infer the revenue trajectory only from these signals:
-* Headcount changes — sustained hiring suggests growth; layoffs or hiring freezes suggest decline or stagnation
-* Funding activity — valuation uplift in a new round suggests healthy revenue; down rounds or a long gap with no funding can signal trouble
-* Customer or user count growth — if the user base is measurably growing, revenue is likely following
-* Web traffic trends — sustained traffic growth or decline from SimilarWeb or similar sources
-* Third-party revenue estimates — from CB Insights, PitchBook, Bloomberg Second Measure, or similar research firms
-Then classify the revenue trajectory as one of the following:
-* Growing — revenue is increasing, state by how much (% or absolute if known)
-* Stable — revenue is flat with no significant movement
-* Declining — revenue is decreasing, state by how much (% or absolute if known)
-* Uncertain — insufficient data to determine direction, but list all signals found
-For every data point, include the source URL and date. Prioritize sources from the last 12 months only. If older data is the only thing available, flag it clearly.
+const SYSTEM_PROMPT_REVENUE_GROWTH = `Research the revenue and revenue growth of the companies over the last 12 months. You MUST always return a numeric revenue estimate AND a growth-rate estimate — never skip with "Not publicly confirmed" or "Unknown" unless you have genuinely found zero usable signals.
+
+STEP 1 — Look for direct revenue figures.
+Search earnings calls, press releases, SEC filings, S-1s, 10-Ks, founder interviews, analyst reports, Bloomberg, Reuters, verified news. If you find revenue figures for at least the latest two points for revenue growth, compute the growth rate directly and add the data of the latest growth evidence in the response.
+
+STEP 2 — If exact figures are NOT available, you MUST infer an estimated revenue figure AND growth rate from proxy signals. Do NOT skip this step. Use any combination of these signals:
+* Funding stage and valuation — late-stage rounds (Series C+) typically imply $20M–$100M+ ARR; valuations at ~10–20× ARR multiples are a common heuristic
+* Headcount × revenue-per-employee benchmarks (e.g. SaaS: $200K–$400K per employee; consumer: $300K–$1M per employee; infra/devtools: $250K–$500K per employee). Use LinkedIn employee count.
+* Headcount growth rate over the last 12 months — sustained 30%+ hiring usually maps to similar revenue growth; flat headcount maps to flat revenue; layoffs to decline
+* Customer count × average contract value (ACV) — if the company discloses logos and a pricing page exists, multiply
+* Web traffic trends from SimilarWeb (signal for consumer / freemium / PLG)
+* App downloads, DAU/MAU, store rankings (data.ai, Sensor Tower)
+* Third-party estimates from Sacra, Growjo, CB Insights, PitchBook, Bloomberg Second Measure, Latka
+
+STEP 3 — Combine signals into an explicit estimate.
+Always express the estimate with the "~" tilde and "(estimated)" suffix when inferred. Examples:
+- "~$15M ARR (estimated), growing ~40% YoY"
+- "~$80M revenue (estimated), growing ~25% YoY"
+- "~$500K ARR (estimated), declining ~10% YoY"
+Show your math in the reasoning field (e.g. "120 employees × $250K rev/employee benchmark = ~$30M ARR; headcount up 35% YoY suggests similar revenue growth").
+
+STEP 4 — Confidence calibration:
+- "high" — direct revenue figures from official sources within last 12 months
+- "medium" — strong proxy signals (multiple converging data points, recent funding round disclosing ARR multiple, credible third-party estimates)
+- "low" — weak proxies (only headcount or only traffic), or older data extrapolated forward
+
+If signals conflict, weight them in this order:
+1. Direct revenue disclosures (highest trust)
+2. Recent funding round ARR multiples disclosed by investors
+3. Headcount × revenue-per-employee benchmark
+4. Web/app traffic trends
+5. Third-party estimates (Growjo, Sacra, Latka)
+
+Note conflicting signals explicitly in the reasoning field and explain which you weighted and why.
+
+Only return "Insufficient data" if ALL of the following are true:
+- No employee count found on LinkedIn or Crunchbase
+- No funding history available
+- No web traffic data accessible
+- No customer count or pricing publicly visible
+- No third-party revenue estimates found on Sacra, Growjo, Latka, or CB Insights
 
 For each input company domain, return exactly one entry in companies[] with:
 - domain: the exact domain provided (lowercase, no www.)
-- growth: the revenue trajectory (e.g. "Growing ~40% YoY (estimated)" or "Not publicly confirmed")
-- evidence: the source URL of the most relevant data point
-- reasoning: how you determined the revenue trajectory
+- growth: the revenue figure AND growth rate, always with units (see Step 3 examples). Prefer "~$Xm ARR (estimated), growing ~Y% YoY" format.
+- evidence: the source URL of the strongest supporting data point used
+- source_date: the publication or "as-of" date of the source in evidence. Use ISO 8601 when an exact date is known (e.g. "2024-03-15"); use a month/quarter/year when the source is less precise (e.g. "March 2024", "Q1 2024", "2024"). Return "" only when no date can be determined from the source.
+- reasoning: 2–4 sentences showing the signals used and how the estimate was derived (include the math when inferred)
 - confidence: "high", "medium", or "low"
 
-Always include every requested domain in the companies array, even if no data is available.`;
+Always include every requested domain in the companies array.`;
 
 const REVENUE_GROWTH_OBJECT_SCHEMA = {
   type: 'object',
@@ -385,10 +413,11 @@ const REVENUE_GROWTH_OBJECT_SCHEMA = {
           domain: { type: 'string' },
           growth: { type: 'string' },
           evidence: { type: 'string' },
+          source_date: { type: 'string' },
           reasoning: { type: 'string' },
           confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
         },
-        required: ['domain', 'growth', 'evidence', 'reasoning', 'confidence'],
+        required: ['domain', 'growth', 'evidence', 'source_date', 'reasoning', 'confidence'],
       },
     },
   },
@@ -398,10 +427,7 @@ const REVENUE_GROWTH_OBJECT_SCHEMA = {
 export async function revenueGrowthExaSearch(domains: string[]): Promise<ExaSearchResponse> {
   if (domains.length === 0) throw new Error('revenueGrowthExaSearch: need at least 1 domain');
 
-  const query =
-    domains.length === 1
-      ? `Research for ${domains[0]}`
-      : `Research for ${domains.slice(0, -1).join(', ')} and ${domains[domains.length - 1]}`;
+  const query = `Estimate revenue, ARR, funding stage, valuation, employee headcount, hiring growth, customer count, and revenue trajectory over the last 12 months for: ${domains.join(', ')}`;
 
   return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
     numResults: 10,
@@ -409,33 +435,70 @@ export async function revenueGrowthExaSearch(domains: string[]): Promise<ExaSear
     stream: false,
     systemPrompt: SYSTEM_PROMPT_REVENUE_GROWTH,
     type: 'deep-reasoning',
+    contents: {
+      text: { maxCharacters: 100000 },
+    },
   });
 }
 
-const SYSTEM_PROMPT_NUMBER_OF_USERS = `Research the total number of users, customers, or accounts for the companies.
-First, look for an exact count. Search official sources: press releases, blog posts, earnings calls, SEC filings, founder interviews, and verified news articles. If an exact number is found, record it along with what the company calls it (e.g. "monthly active users", "paying customers", "registered accounts"), the date it refers to, and the source URL.
-If no exact count is publicly available, gather every one of the following proxy signals that exists:
-Annual Recurring Revenue (ARR), MRR, or total revenue — with year
-Pricing tiers and their costs (free, pro, enterprise, per-seat pricing)
-Total funding raised and latest valuation
-Employee headcount and any stated growth rate
-App store download counts, DAU/MAU figures, or store rankings
-Number of paying vs. free users, if ever distinguished
-Geographic markets or number of countries served
-Number of enterprise clients vs. individual/SMB users
-Year-over-year or month-over-month growth rate percentages
-Any third-party estimates from analysts, research firms, or data providers (SimilarWeb, data.ai, CB Insights, PitchBook, G2, etc.)
+const SYSTEM_PROMPT_NUMBER_OF_USERS = `Research the total number of users, customers, or accounts for the companies. You MUST always return a numeric estimate — never skip with "Not publicly disclosed" or "Unknown" unless you have genuinely found zero usable signals.
 
-Search across: the company's official blog, press releases, Crunchbase, LinkedIn, SimilarWeb, App Annie/data.ai, G2, Trustpilot, CB Insights, PitchBook, earnings call transcripts, and industry news.
-For every data point, include the source URL and publication date. Always prefer the most recent data available. Note any caveats — for example, if the company has a stated policy of not disclosing user numbers, or if conflicting figures appear across sources.
+STEP 1 — Look for an exact disclosed count.
+Search official sources: press releases, blog posts, earnings calls, SEC filings, S-1s, founder interviews, verified news, the company's own homepage ("trusted by 10,000 teams" type claims), G2 / Trustpilot review counts, App Store / Google Play install counts. If an exact number is found, record it with the unit ("monthly active users", "paying customers", "registered accounts", "businesses", etc.), date, and source URL.
+
+STEP 2 — If no exact count is publicly disclosed, you MUST infer an estimated user count from proxy signals. Do NOT skip this step. Use any combination of these signals:
+* ARR or revenue ÷ average contract value (ACV) — e.g. $20M ARR ÷ $5K ACV ≈ 4,000 customers
+* Pricing tiers × headcount or funding stage — extrapolate likely customer mix
+* Funding stage benchmarks — Series A SaaS typically 50–500 customers; Series B 500–5,000; Series C 5,000+
+* Employee headcount × industry user-per-employee ratios (consumer apps: 100K–1M users/employee; SaaS: 50–500 customers/employee)
+* App store install counts, DAU/MAU figures, store rankings (data.ai, Sensor Tower)
+* Web traffic from SimilarWeb (monthly visits is a useful upper bound for free/freemium signups)
+* Number of enterprise logos × typical seat counts for the customer's industry
+* Geographic markets / countries served — proxy for scale
+* Third-party estimates from Sacra, Growjo, Latka, CB Insights, PitchBook, G2
+
+STEP 3 — Combine signals into an explicit numeric estimate.
+Always express inferred numbers with the "~" tilde and "(estimated)" suffix. Examples:
+- "~5,000 customers (estimated)"
+- "~250K MAU (estimated)"
+- "~80 enterprise customers (estimated)"
+Show your math in the reasoning field (e.g. "$15M ARR disclosed ÷ ~$3K average ACV from pricing page = ~5,000 customers").
+
+STEP 4 — Confidence calibration:
+- "high" — direct disclosed count from official source within last 12 months
+- "medium" — strong proxy (e.g. ARR ÷ ACV with both numbers grounded; credible third-party estimate)
+- "low" — weak proxies (only headcount, only traffic), order-of-magnitude estimate
+
+G2 or Trustpilot review counts: multiply by 30–100x to estimate actual customer count (typical review rate is 1–3% of customers). Weight this as a low-confidence signal unless corroborated.
+
+Only return "Insufficient data" if ALL of the following are true:
+- No employee count on LinkedIn or Crunchbase
+- No funding history available
+- No app store presence or web traffic data
+- No pricing page or customer count claim found
+- No third-party estimates on Sacra, Growjo, Latka, G2, or CB Insights
+
+App store install counts: apply a 20–40% active-user discount for consumer apps (assume 60–80% of installs are dormant or churned). Use store rankings as a directional signal, not a precise count.
+
+Web traffic (SimilarWeb): only use as a proxy for consumer, freemium, or PLG-driven products. For sales-led B2B SaaS, disregard or use only as a sanity check, not a primary signal.
+
+If signals suggest different scales (e.g. large free user base vs small paid customer base), report both separately:
+- "paid_customers": "~500 paying customers (estimated)"
+- "free_users": "~2M registered/free users (estimated)"
+
+Only collapse them if the company is purely paid with no free tier.
 
 For each input company domain, return exactly one entry in companies[] with:
 - domain: the exact domain provided (lowercase, no www.)
-- user_count: the user count (e.g. "10,000 customers" or "~500K MAU (estimate)" or "Not publicly disclosed")
-- reasoning: how you determined the user count, including any proxy signals used
-- source_link: the URL of the most relevant source
+- user_count: the count, always with units (see Step 3 examples). Prefer "~N units (estimated)" when inferred.
+- reasoning: 2–4 sentences showing the signals used and the math when inferred
+- source_link: the URL of the strongest supporting source used (source_link: for direct disclosures, link to the exact source. For inferred estimates, link to the single strongest signal used (e.g. the funding announcement if ARR multiple was the key input, the LinkedIn page if headcount was primary).)
+- source_date: the publication or "as-of" date of the source in source_link. Use ISO 8601 when an exact date is known (e.g. "2024-03-15"); use a month/quarter/year when the source is less precise (e.g. "March 2024", "Q1 2024", "2024"). Return "" only when no date can be determined from the source.
+- confidence: "high", "medium", or "low"
 
-Always include every requested domain in the companies array, even if no data is available.`;
+
+
+Always include every requested domain in the companies array.`;
 
 const NUMBER_OF_USERS_OBJECT_SCHEMA = {
   type: 'object',
@@ -449,8 +512,10 @@ const NUMBER_OF_USERS_OBJECT_SCHEMA = {
           user_count: { type: 'string' },
           reasoning: { type: 'string' },
           source_link: { type: 'string' },
+          source_date: { type: 'string' },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
         },
-        required: ['domain', 'user_count', 'reasoning', 'source_link'],
+        required: ['domain', 'user_count', 'reasoning', 'source_link', 'source_date', 'confidence'],
       },
     },
   },
@@ -460,10 +525,7 @@ const NUMBER_OF_USERS_OBJECT_SCHEMA = {
 export async function numberOfUsersExaSearch(domains: string[]): Promise<ExaSearchResponse> {
   if (domains.length === 0) throw new Error('numberOfUsersExaSearch: need at least 1 domain');
 
-  const query =
-    domains.length === 1
-      ? `Research for ${domains[0]}`
-      : `Research for ${domains.slice(0, -1).join(', ')} and ${domains[domains.length - 1]}`;
+  const query = `Estimate total users, customers, accounts, ARR, pricing, funding stage, employee headcount, app downloads, and web traffic for: ${domains.join(', ')}`;
 
   return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
     numResults: 10,
@@ -471,5 +533,8 @@ export async function numberOfUsersExaSearch(domains: string[]): Promise<ExaSear
     stream: false,
     systemPrompt: SYSTEM_PROMPT_NUMBER_OF_USERS,
     type: 'deep-reasoning',
+    contents: {
+      text: { maxCharacters: 100000 },
+    },
   });
 }

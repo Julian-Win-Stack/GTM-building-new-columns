@@ -5,7 +5,11 @@ export type NumberOfUsersData = {
   user_count: string;
   reasoning: string;
   source_link: string;
+  source_date: string;
+  confidence: 'high' | 'medium' | 'low';
 };
+
+const VALID_CONFIDENCE: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
 
 function normalizeDomain(raw: string): string {
   return raw.trim().toLowerCase().replace(/^www\./, '');
@@ -32,8 +36,16 @@ export function parseNumberOfUsersResponse(
     const user_count = typeof rec['user_count'] === 'string' ? rec['user_count'] : '';
     const reasoning = typeof rec['reasoning'] === 'string' ? rec['reasoning'] : '';
     const source_link = typeof rec['source_link'] === 'string' ? rec['source_link'] : '';
-    if (!domainRaw || !user_count) continue;
-    parsedMap.set(normalizeDomain(domainRaw), { user_count, reasoning, source_link });
+    const source_date = typeof rec['source_date'] === 'string' ? rec['source_date'] : '';
+    const confidenceRaw = typeof rec['confidence'] === 'string' ? rec['confidence'].toLowerCase() : '';
+    if (!domainRaw || !user_count || !VALID_CONFIDENCE.has(confidenceRaw)) continue;
+    parsedMap.set(normalizeDomain(domainRaw), {
+      user_count,
+      reasoning,
+      source_link,
+      source_date,
+      confidence: confidenceRaw as NumberOfUsersData['confidence'],
+    });
   }
 
   const results = companies.map((company) => {
@@ -57,5 +69,7 @@ export function formatNumberOfUsersForAttio(d: NumberOfUsersData): string {
   const parts = [`User count: ${d.user_count}`];
   if (d.reasoning) parts.push(`Reasoning: ${d.reasoning}`);
   if (d.source_link) parts.push(`Source link: ${d.source_link}`);
+  if (d.source_date) parts.push(`Source date: ${d.source_date}`);
+  parts.push(`Confidence: ${d.confidence}`);
   return parts.join('\n\n');
 }
