@@ -5,7 +5,7 @@ import { theirstackJobsByTechnology } from '../apis/theirstack.js';
 import { scheduleExa, scheduleTheirstack } from '../rateLimit.js';
 import { deriveDomain } from '../util.js';
 import type { InputRow } from '../types.js';
-import type { StageCompany } from '../stages/types.js';
+import type { StageCompany, StageResult } from '../stages/types.js';
 import { runStage } from '../stages/runStage.js';
 import { writeStageColumn } from '../stages/writeStageColumn.js';
 import { filterSurvivors } from '../stages/filterSurvivors.js';
@@ -26,6 +26,12 @@ import {
   type CommunicationToolRaw,
   type CommunicationToolData,
 } from '../stages/communicationTool.js';
+import {
+  matchCompetitorTools,
+  competitorToolGate,
+  formatCompetitorToolForAttio,
+  type CompetitorToolData,
+} from '../stages/competitorTool.js';
 import { fetchAllRecords, FIELD_SLUGS } from '../apis/attio.js';
 
 export type EnrichAllOptions = {
@@ -76,6 +82,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   console.log(`[enrich-all] attio cache loaded (${attioCache.size} records found)`);
 
   if (opts.dryRun) {
+    const { todo: comp, done: compDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Competitor Tooling']!);
+    console.log(`[dry] competitor-tool: todo=${comp.length} skipped=${compDone.length}`);
     const { todo: dn, done: dnDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Digital Native']!);
     console.log(`[dry] digital-native: todo=${dn.length} skipped=${dnDone.length}`);
     for (let i = 0; i < dn.length; i += 2) {
@@ -89,14 +97,36 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     return;
   }
 
-  // Stage 1 — Digital Native
-  const stage1Slug = FIELD_SLUGS['Digital Native']!;
+  // Stage 1 — Competitor Tool (local match, no API call)
+  const stage1Slug = FIELD_SLUGS['Competitor Tooling']!;
   const { todo: stage1Todo, done: stage1Done } = splitByCache(companies, attioCache, stage1Slug);
-  console.log(`[digitalNative] todo=${stage1Todo.length} skipped=${stage1Done.length}`);
+  console.log(`[competitorTool] todo=${stage1Todo.length} skipped=${stage1Done.length}`);
 
-  const stage1Results = await runStage({
+  const stage1Results: StageResult<CompetitorToolData>[] = stage1Todo.map((company) => ({
+    company,
+    data: { matchedTools: matchCompetitorTools(company.companyName) },
+  }));
+  await writeStageColumn('Competitor Tooling', stage1Results, formatCompetitorToolForAttio);
+  for (const r of stage1Results) {
+    if (r.error === undefined) {
+      const existing = attioCache.get(r.company.domain) ?? {};
+      attioCache.set(r.company.domain, {
+        ...existing,
+        [stage1Slug]: formatCompetitorToolForAttio(r.data),
+      });
+    }
+  }
+  const stage1TodoSurvivors = filterSurvivors('competitorTool', stage1Results, competitorToolGate);
+  const survivorsAfterStage1 = [...stage1TodoSurvivors, ...stage1Done];
+
+  // Stage 2 — Digital Native
+  const stage2Slug = FIELD_SLUGS['Digital Native']!;
+  const { todo: stage2Todo, done: stage2Done } = splitByCache(survivorsAfterStage1, attioCache, stage2Slug);
+  console.log(`[digitalNative] todo=${stage2Todo.length} skipped=${stage2Done.length}`);
+
+  const stage2Results = await runStage({
     name: 'digitalNative',
-    companies: stage1Todo,
+    companies: stage2Todo,
     batchSize: 2,
     retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
     call: (domains) => scheduleExa(() => digitalNativeExaSearch(domains)),
@@ -106,23 +136,23 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       for (const r of batchResults) {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
-          attioCache.set(r.company.domain, { ...existing, [stage1Slug]: formatDigitalNativeForAttio(r.data) });
+          attioCache.set(r.company.domain, { ...existing, [stage2Slug]: formatDigitalNativeForAttio(r.data) });
         }
       }
     },
   });
 
-  const stage1TodoSurvivors = filterSurvivors('digitalNative', stage1Results, digitalNativeGate);
-  const survivors = [...stage1TodoSurvivors, ...stage1Done];
+  const stage2TodoSurvivors = filterSurvivors('digitalNative', stage2Results, digitalNativeGate);
+  const survivorsAfterStage2 = [...stage2TodoSurvivors, ...stage2Done];
 
-  // Stage 2 — Observability Tool
-  const stage2Slug = FIELD_SLUGS['Observability Tool']!;
-  const { todo: stage2Todo, done: stage2Done } = splitByCache(survivors, attioCache, stage2Slug);
-  console.log(`[observabilityTool] todo=${stage2Todo.length} skipped=${stage2Done.length}`);
+  // Stage 3 — Observability Tool
+  const stage3Slug = FIELD_SLUGS['Observability Tool']!;
+  const { todo: stage3Todo, done: stage3Done } = splitByCache(survivorsAfterStage2, attioCache, stage3Slug);
+  console.log(`[observabilityTool] todo=${stage3Todo.length} skipped=${stage3Done.length}`);
 
-  const stage2Results = await runStage({
+  const stage3Results = await runStage({
     name: 'observabilityTool',
-    companies: stage2Todo,
+    companies: stage3Todo,
     batchSize: 2,
     retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
     call: (domains) => scheduleExa(() => observabilityToolExaSearch(domains)),
@@ -132,23 +162,23 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       for (const r of batchResults) {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
-          attioCache.set(r.company.domain, { ...existing, [stage2Slug]: formatObservabilityToolForAttio(r.data) });
+          attioCache.set(r.company.domain, { ...existing, [stage3Slug]: formatObservabilityToolForAttio(r.data) });
         }
       }
     },
   });
 
-  const stage2TodoSurvivors = filterSurvivors('observabilityTool', stage2Results, observabilityToolGate);
-  const survivorsAfterStage2 = [...stage2TodoSurvivors, ...stage2Done];
+  const stage3TodoSurvivors = filterSurvivors('observabilityTool', stage3Results, observabilityToolGate);
+  const survivorsAfterStage3 = [...stage3TodoSurvivors, ...stage3Done];
 
-  // Stage 3 — Communication Tool
-  const stage3Slug = FIELD_SLUGS['Communication Tool']!;
-  const { todo: stage3Todo, done: stage3Done } = splitByCache(survivorsAfterStage2, attioCache, stage3Slug);
-  console.log(`[communicationTool] todo=${stage3Todo.length} skipped=${stage3Done.length}`);
+  // Stage 4 — Communication Tool
+  const stage4Slug = FIELD_SLUGS['Communication Tool']!;
+  const { todo: stage4Todo, done: stage4Done } = splitByCache(survivorsAfterStage3, attioCache, stage4Slug);
+  console.log(`[communicationTool] todo=${stage4Todo.length} skipped=${stage4Done.length}`);
 
-  const stage3Results = await runStage<CommunicationToolRaw, CommunicationToolData>({
+  const stage4Results = await runStage<CommunicationToolRaw, CommunicationToolData>({
     name: 'communicationTool',
-    companies: stage3Todo,
+    companies: stage4Todo,
     batchSize: 1,
     retry: { tries: THEIRSTACK_RETRY_TRIES, baseMs: THEIRSTACK_RETRY_BASE_MS },
     call: async (domains) => {
@@ -175,18 +205,18 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, {
             ...existing,
-            [stage3Slug]: formatCommunicationToolForAttio(r.data),
+            [stage4Slug]: formatCommunicationToolForAttio(r.data),
           });
         }
       }
     },
   });
 
-  const stage3TodoSurvivors = filterSurvivors('communicationTool', stage3Results, communicationToolGate);
-  const survivorsAfterStage3 = [...stage3TodoSurvivors, ...stage3Done];
+  const stage4TodoSurvivors = filterSurvivors('communicationTool', stage4Results, communicationToolGate);
+  const survivorsAfterStage4 = [...stage4TodoSurvivors, ...stage4Done];
 
-  console.log(`\n[enrich-all] survivors after stage 3 (${survivorsAfterStage3.length}):`);
-  for (const c of survivorsAfterStage3) console.log(`  ${c.domain}  (${c.companyName})`);
+  console.log(`\n[enrich-all] survivors after stage 4 (${survivorsAfterStage4.length}):`);
+  for (const c of survivorsAfterStage4) console.log(`  ${c.domain}  (${c.companyName})`);
 
-  console.log(`\n[done] total=${companies.length} survivors=${survivorsAfterStage3.length} badDomains=${skippedBadDomain}`);
+  console.log(`\n[done] total=${companies.length} survivors=${survivorsAfterStage4.length} badDomains=${skippedBadDomain}`);
 }

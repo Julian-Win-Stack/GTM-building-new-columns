@@ -44,9 +44,10 @@ src/
     runStage.ts     — generic stage runner: batches concurrent via Promise.all, per-batch retry with exponential backoff (1s→4s→16s), afterBatch fires as soon as each batch resolves
     writeStageColumn.ts — write one column to Attio for all successful stage results; bounded by attioWriteLimit; logs and swallows per-row failures
     filterSurvivors.ts  — apply gate, log passed/rejected/errored counts
-    digitalNative.ts    — Stage 1: parser (structured JSON), gate, Attio formatter
-    observabilityTool.ts — Stage 2: async parser (structured JSON), LinkedIn profile verification via Azure OpenAI judge(), gate (Datadog/Grafana/Prometheus allowlist), Attio formatter
-    communicationTool.ts — Stage 3: sync parser, two-step TheirStack search (Slack → Microsoft Teams), gate (reject if MS Teams), Attio formatter
+    competitorTool.ts   — Stage 1: local company-name match against known customer lists, gate (reject if any match), Attio formatter (comma-joined tool names or "Not using any competitor tools")
+    digitalNative.ts    — Stage 2: parser (structured JSON), gate, Attio formatter
+    observabilityTool.ts — Stage 3: async parser (structured JSON), LinkedIn profile verification via Azure OpenAI judge(), gate (Datadog/Grafana/Prometheus allowlist), Attio formatter
+    communicationTool.ts — Stage 4: sync parser, two-step TheirStack search (Slack → Microsoft Teams), gate (reject if MS Teams), Attio formatter
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
@@ -82,14 +83,16 @@ No on-disk progress ledger. Resume semantics come from the Attio pre-fetch: on s
 
 | # | Column | API | Gate (pass condition) |
 |---|---|---|---|
-| 1 | Digital Native | Exa | category is NOT `NOT Digital-native` (B2B companies continue) |
-| 2 | Observability Tool | Exa | no tool evidence OR at least one of: Datadog, Grafana, Prometheus |
-| 3 | Communication Tool | TheirStack | no evidence OR uses Slack (reject if Microsoft Teams / Microsoft) |
-| 4 | Competitor Tooling | Exa | NOT using any of: Resolve.ai, Rootly, Incident.io, FireHydrant, PagerDuty, Opsgenie, xMatters, Splunk On-Call, BigPanda, Moogsoft |
+| 1 | Competitor Tooling | *local match* | company name NOT in any competitor-tool customer list (Resolve.ai, Rootly, Incident.io, FireHydrant, PagerDuty, Opsgenie, xMatters, Splunk On-Call, BigPanda, Moogsoft) |
+| 2 | Digital Native | Exa | category is NOT `NOT Digital-native` (B2B companies continue) |
+| 3 | Observability Tool | Exa | no tool evidence OR at least one of: Datadog, Grafana, Prometheus |
+| 4 | Communication Tool | TheirStack | no evidence OR uses Slack (reject if Microsoft Teams / Microsoft) |
 | 5 | Cloud Tool | Exa | no evidence OR uses AWS OR GCP |
 | 6–16 | remaining columns | various | no gate — data collection only |
 
 Stages 1–5 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing.
+
+Stage 1 (Competitor Tooling) is purely local — no API call, no rate limit. Matching is case-insensitive exact match on the trimmed CSV company name against the per-tool customer lists in `src/stages/competitorTool.ts:COMPETITOR_TOOLS`. To update the list, edit that constant directly.
 
 ### Attio value format for Exa-based stages
 
@@ -120,14 +123,28 @@ or
 ```
 Microsoft Teams: <source_url>
 ```
-Stage 3 is per-company (batchSize: 1), not batch-of-2. The call makes two sequential TheirStack POST requests per company: first for `"slack"`, then for `"microsoft-teams"` only if Slack returned nothing. Companies with Slack evidence or no evidence continue; companies with only Microsoft Teams evidence are rejected by the gate.
+Stage 4 is per-company (batchSize: 1), not batch-of-2. The call makes two sequential TheirStack POST requests per company: first for `"slack"`, then for `"microsoft-teams"` only if Slack returned nothing. Companies with Slack evidence or no evidence continue; companies with only Microsoft Teams evidence are rejected by the gate.
 If no evidence found: literal `No evidence found`.
+
+**Competitor Tooling** — comma-joined competitor tool names when the CSV company matches a known customer list, or a literal string otherwise:
+```
+Rootly
+```
+or (multiple matches):
+```
+Splunk On-Call, BigPanda
+```
+or (no match, passed):
+```
+Not using any competitor tools
+```
 
 ### Exa output schema
 Digital Native uses Exa's structured `outputSchema` (object with `companies[]`), not freeform text. Parser lives in `stages/digitalNative.ts` and reads `raw.output.content` as a parsed object. New Exa stages should follow the same pattern — prefer structured schemas over text parsing.
 
 ### API mapping
-- **Exa (batch of 2)**: Digital Native, Observability Tool, Competitor Tooling, Cloud Tool, Funding Growth, Revenue Growth, Number of Users
+- **Local match (no API)**: Competitor Tooling
+- **Exa (batch of 2)**: Digital Native, Observability Tool, Cloud Tool, Funding Growth, Revenue Growth, Number of Users
 - **TheirStack**: Communication Tool
 - **TBD**: Number of Engineers, Number of SREs, Engineer Hiring, SRE Hiring, Customer complains on X, Recent incidents ( Official ), AI adoption mindset, AI SRE maturity
 
