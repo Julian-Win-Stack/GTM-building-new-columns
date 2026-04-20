@@ -542,3 +542,62 @@ export async function numberOfUsersExaSearch(domains: string[]): Promise<ExaSear
     },
   });
 }
+
+const AI_ADOPTION_MINDSET_SYSTEM_PROMPT = (companyName: string) =>
+  `You are an analyst classifying a company's AI adoption mindset using only explicit, verifiable public evidence.
+
+Classify ${companyName} as one of: Aggressive, Neutral, or Conservative.
+
+Aggressive = AI is core to strategy, company-wide mandates, org changes driven by AI, urgency from leadership.
+Neutral = AI is incremental, selective, experimental, balanced tone.
+Conservative = AI is framed as risky, governance-first, restricted, skeptical tone dominates.
+
+You may draw evidence from any of the following public sources:
+- LinkedIn posts from employees or leadership
+- Executive blog posts or articles
+- Company blog posts or press releases
+- Job postings and hiring patterns related to AI roles
+- Conference talks or interviews
+- Earnings calls or investor statements
+
+Use hiring signals as strong evidence. A company aggressively hiring for AI-specific roles, creating new AI functions, or restructuring teams around AI indicates aggressive adoption. A company with few or no AI-specific roles, or roles focused purely on governance and oversight, may indicate conservative adoption.
+
+Output format:
+Classification: <Aggressive | Neutral | Conservative | Not publicly confirmed>
+Confidence: <High | Medium | Low>
+Evidence:
+- "<paraphrase of statement or observation>" (source URL)
+- "<paraphrase of statement or observation>" (source URL)
+Reasoning:
+- 2 to 4 bullet points tied directly to evidence
+
+Rules:
+- Only use explicit, verifiable statements or observable facts from the search results
+- Do not infer or assume internal practices beyond what is directly stated
+- Do not classify based on keywords alone
+- If signals conflict, choose the dominant pattern and lower confidence
+- If evidence is insufficient, output: Not publicly confirmed
+- Prioritize actions and hiring patterns over rhetoric
+- Prioritize executive statements over general employee posts`;
+
+export async function aiAdoptionMindsetExaSearch(
+  companyName: string,
+  domain: string
+): Promise<ExaSearchResponse> {
+  const query = `${domain} engineers and executives sharing their views on how AI is being used internally, AI strategy, and the company's approach to AI adoption`;
+  const additionalQuery = `${companyName} AI job postings hiring engineers researchers or job posts that are related to AI adoption mindset`;
+
+  return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
+    additionalQueries: [additionalQuery],
+    numResults: 10,
+    outputSchema: { type: 'text' },
+    stream: false,
+    systemPrompt: AI_ADOPTION_MINDSET_SYSTEM_PROMPT(companyName),
+    type: 'deep-reasoning',
+    contents: {
+      highlights: {
+        query: 'AI strategy adoption mandate restructuring governance internal use',
+      },
+    },
+  });
+}

@@ -1,6 +1,6 @@
 import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS, STATUSPAGE_RETRY_TRIES, STATUSPAGE_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
-import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch } from '../apis/exa.js';
+import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch, aiAdoptionMindsetExaSearch, type ExaSearchResponse } from '../apis/exa.js';
 import { collectJobUrls, theirstackJobsByTechnology } from '../apis/theirstack.js';
 import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi } from '../rateLimit.js';
 import { deriveDomain, normalizeLinkedInUrl } from '../util.js';
@@ -64,6 +64,7 @@ import { parseCustomerComplaintsResponse, formatCustomerComplaintsForAttio, type
 import { fetchComplaintTweets } from '../apis/twitterapi.js';
 import { parseRecentIncidentsResponse, formatRecentIncidentsForAttio, type RecentIncidentsData } from '../stages/recentIncidents.js';
 import { fetchRecentIncidents, type FetchOutcome as StatuspageFetchOutcome } from '../apis/statuspage.js';
+import { parseAiAdoptionMindsetResponse, formatAiAdoptionMindsetForAttio, type AiAdoptionMindsetData } from '../stages/aiAdoptionMindset.js';
 import { fetchAllRecords, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
@@ -587,6 +588,35 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, { ...existing, [stage14Slug]: formatRecentIncidentsForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // Stage 15 — AI Adoption Mindset (non-gating, data collection only)
+  const stage15Slug = FIELD_SLUGS['AI adoption mindset']!;
+  const { todo: stage15Todo, done: stage15Done } = splitByCache(survivorsAfterStage6, attioCache, stage15Slug);
+  console.log(`[aiAdoptionMindset] todo=${stage15Todo.length} skipped=${stage15Done.length}`);
+
+  const companyNameByDomain15 = new Map(stage15Todo.map((c) => [c.domain, c.companyName]));
+
+  await runStage<ExaSearchResponse, AiAdoptionMindsetData>({
+    name: 'aiAdoptionMindset',
+    companies: stage15Todo,
+    batchSize: 1,
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => {
+      const domain = domains[0]!;
+      const name = companyNameByDomain15.get(domain) ?? '';
+      return scheduleExa(() => aiAdoptionMindsetExaSearch(name, domain));
+    },
+    parse: (raw, batch) => parseAiAdoptionMindsetResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('AI adoption mindset', batchResults, formatAiAdoptionMindsetForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage15Slug]: formatAiAdoptionMindsetForAttio(r.data) });
         }
       }
     },
