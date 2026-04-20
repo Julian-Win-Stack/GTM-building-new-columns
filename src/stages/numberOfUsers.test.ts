@@ -66,6 +66,14 @@ describe('parseNumberOfUsersResponse', () => {
     expect(out[0]!.error).toBeUndefined();
   });
 
+  it('lowercases domain when matching', () => {
+    const raw = buildResponse({
+      companies: [{ domain: 'ACME.COM', user_count: '100K', user_count_numeric: 100000, reasoning: 'estimate', source_link: 'https://x.com', source_date: '2024-02-01', confidence: 'low' }],
+    });
+    const out = parseNumberOfUsersResponse(raw, [{ companyName: 'Acme', domain: 'acme.com' }]);
+    expect(out[0]!.error).toBeUndefined();
+  });
+
   it('lowercases confidence before validating', () => {
     const raw = buildResponse({
       companies: [{ domain: 'acme.com', user_count: '~5K (estimated)', user_count_numeric: 5000, reasoning: 'signals', source_link: 'https://x.com', source_date: '2024-02-01', confidence: 'High' }],
@@ -83,6 +91,41 @@ describe('parseNumberOfUsersResponse', () => {
     expect(out[0]!.error).toBe('no output from Exa');
   });
 
+  it('rejects items with invalid confidence value', () => {
+    const raw = buildResponse({
+      companies: [{ domain: 'acme.com', user_count: '10K', user_count_numeric: 10000, reasoning: 'signals', source_link: 'https://x.com', source_date: '2024-02-01', confidence: 'very-high' }],
+    });
+    const out = parseNumberOfUsersResponse(raw, [{ companyName: 'Acme', domain: 'acme.com' }]);
+    expect(out[0]!.error).toBe('no output from Exa');
+  });
+
+  it('returns error when Exa returns content as a JSON string', () => {
+    const raw = buildResponse(JSON.stringify({
+      companies: [{ domain: 'acme.com', user_count: '10K', user_count_numeric: 10000, reasoning: 'blog', source_link: 'https://x.com', source_date: '2024-02-01', confidence: 'high' }],
+    }));
+    const out = parseNumberOfUsersResponse(raw, [{ companyName: 'Acme', domain: 'acme.com' }]);
+    expect(out[0]!.error).toBe('no output from Exa');
+  });
+
+  it('accepts empty reasoning, source_link, and source_date when confidence is present', () => {
+    const raw = buildResponse({
+      companies: [{ domain: 'acme.com', user_count: 'Insufficient data', user_count_numeric: 0, reasoning: '', source_link: '', source_date: '', confidence: 'low' }],
+    });
+    const out = parseNumberOfUsersResponse(raw, [{ companyName: 'Acme', domain: 'acme.com' }]);
+    expect(out[0]!.error).toBeUndefined();
+    expect(out[0]!.data?.user_count).toBe('Insufficient data');
+    expect(out[0]!.data?.source_date).toBe('');
+  });
+
+  it('defaults source_date to empty string when missing from response', () => {
+    const raw = buildResponse({
+      companies: [{ domain: 'acme.com', user_count: '10K', user_count_numeric: 10000, reasoning: 'blog', source_link: 'https://x.com', confidence: 'high' }],
+    });
+    const out = parseNumberOfUsersResponse(raw, [{ companyName: 'Acme', domain: 'acme.com' }]);
+    expect(out[0]!.error).toBeUndefined();
+    expect(out[0]!.data?.source_date).toBe('');
+  });
+
   it('returns error when company is missing from response', () => {
     const raw = buildResponse({ companies: [] });
     const out = parseNumberOfUsersResponse(raw, [{ companyName: 'Missing', domain: 'missing.com' }]);
@@ -98,9 +141,9 @@ describe('formatNumberOfUsersForAttio', () => {
     );
   });
 
-  it('always includes user_count_numeric', () => {
+  it('returns a single-line fallback when user_count_numeric is 0', () => {
     const data: NumberOfUsersData = { user_count: 'Insufficient data', user_count_numeric: 0, reasoning: '', source_link: '', source_date: '', confidence: 'low' };
-    expect(formatNumberOfUsersForAttio(data)).toContain('User count (numeric): 0');
+    expect(formatNumberOfUsersForAttio(data)).toBe('No user count found (even estimate)');
   });
 
   it('omits reasoning when empty', () => {
@@ -109,7 +152,7 @@ describe('formatNumberOfUsersForAttio', () => {
   });
 
   it('omits source_link when empty', () => {
-    const data: NumberOfUsersData = { user_count: 'Insufficient data', user_count_numeric: 0, reasoning: 'No signals found', source_link: '', source_date: '2024', confidence: 'low' };
+    const data: NumberOfUsersData = { user_count: 'Insufficient data', user_count_numeric: 50000, reasoning: 'No signals found', source_link: '', source_date: '2024', confidence: 'low' };
     expect(formatNumberOfUsersForAttio(data)).not.toContain('Source link:');
   });
 
@@ -135,6 +178,10 @@ describe('extractUserCountNumericFromCached', () => {
 
   it('returns null for an empty string', () => {
     expect(extractUserCountNumericFromCached('')).toBeNull();
+  });
+
+  it('returns null for the single-line fallback written when numeric is 0', () => {
+    expect(extractUserCountNumericFromCached('No user count found (even estimate)')).toBeNull();
   });
 
   it('returns null when the value is not a valid number', () => {

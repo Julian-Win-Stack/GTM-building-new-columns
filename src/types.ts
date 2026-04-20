@@ -20,7 +20,8 @@ export type EnrichableColumn =
   | 'Funding Growth'
   | 'Revenue Growth'
   | 'AI adoption mindset'
-  | 'AI SRE maturity';
+  | 'AI SRE maturity'
+  | 'Reason for Rejection';
 
 export type EnrichmentResult = {
   'Company Name': string;
@@ -42,6 +43,7 @@ export type EnrichmentResult = {
   'Revenue Growth': string;
   'AI adoption mindset': string;
   'AI SRE maturity': string;
+  'Reason for Rejection': string;
 };
 
 export type EnricherInput = {

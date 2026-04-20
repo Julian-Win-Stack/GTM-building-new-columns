@@ -69,6 +69,7 @@ export function parseNumberOfUsersResponse(
 }
 
 export function formatNumberOfUsersForAttio(d: NumberOfUsersData): string {
+  if (d.user_count_numeric === 0) return 'No user count found (even estimate)';
   const parts = [`User count: ${d.user_count}`];
   parts.push(`User count (numeric): ${d.user_count_numeric}`);
   if (d.reasoning) parts.push(`Reasoning: ${d.reasoning}`);

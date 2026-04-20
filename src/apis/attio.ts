@@ -22,6 +22,7 @@ export const FIELD_SLUGS: Record<string, string> = {
   'Revenue Growth': 'revenue_growth',
   'AI adoption mindset': 'ai_adoption_mindset',
   'AI SRE maturity': 'ai_sre_maturity',
+  'Reason for Rejection': 'reason_for_rejection',
 };
 
 const http = axios.create({

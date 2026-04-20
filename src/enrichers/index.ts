@@ -16,6 +16,7 @@ const fundingGrowth: EnricherFn = async (_input) => '';
 const revenueGrowth: EnricherFn = async (_input) => '';
 const aiAdoptionMindset: EnricherFn = async (_input) => '';
 const aiSreMaturity: EnricherFn = async (_input) => '';
+const reasonForRejection: EnricherFn = async (_input) => '';
 
 export const ENRICHERS: Record<EnrichableColumn, EnricherFn> = {
   'Digital Native': digitalNative,
@@ -34,6 +35,7 @@ export const ENRICHERS: Record<EnrichableColumn, EnricherFn> = {
   'Revenue Growth': revenueGrowth,
   'AI adoption mindset': aiAdoptionMindset,
   'AI SRE maturity': aiSreMaturity,
+  'Reason for Rejection': reasonForRejection,
 };
 
 export const ENRICHABLE_COLUMN_LIST = Object.keys(ENRICHERS) as EnrichableColumn[];

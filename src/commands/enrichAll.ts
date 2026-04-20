@@ -1,4 +1,4 @@
-import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS } from '../config.js';
+import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS, STATUSPAGE_RETRY_TRIES, STATUSPAGE_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch } from '../apis/exa.js';
 import { collectJobUrls, theirstackJobsByTechnology } from '../apis/theirstack.js';
@@ -9,6 +9,15 @@ import type { StageCompany, StageResult } from '../stages/types.js';
 import { runStage } from '../runStage.js';
 import { writeStageColumn } from '../writeStageColumn.js';
 import { filterSurvivors, filterCachedSurvivors } from '../filterSurvivors.js';
+import { writeRejectionReasons } from '../writeRejectionReason.js';
+import {
+  competitorToolRejectionReason, competitorToolCacheRejectionReason,
+  digitalNativeRejectionReason, digitalNativeCacheRejectionReason,
+  numberOfUsersRejectionReason,
+  observabilityToolRejectionReason, observabilityToolCacheRejectionReason,
+  communicationToolRejectionReason, communicationToolCacheRejectionReason,
+  cloudToolRejectionReason, cloudToolCacheRejectionReason,
+} from '../rejectionReasons.js';
 import {
   parseDigitalNativeResponse,
   digitalNativeGate,
@@ -53,6 +62,8 @@ import { runHarvestLinkedInEmployees, runCareerSiteJobListings, type HarvestEmpl
 import { parseHiringResponse, formatEngineerHiringForAttio, formatSreHiringForAttio, type CombinedHiringData } from '../stages/engineerHiring.js';
 import { parseCustomerComplaintsResponse, formatCustomerComplaintsForAttio, type CustomerComplaintsData } from '../stages/customerComplaintsOnX.js';
 import { fetchComplaintTweets } from '../apis/twitterapi.js';
+import { parseRecentIncidentsResponse, formatRecentIncidentsForAttio, type RecentIncidentsData } from '../stages/recentIncidents.js';
+import { fetchRecentIncidents, type FetchOutcome as StatuspageFetchOutcome } from '../apis/statuspage.js';
 import { fetchAllRecords, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
@@ -148,6 +159,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     console.log(`[dry] revenue-growth: todo=${rg.length} skipped=${rgDone.length}`);
     const { todo: cc, done: ccDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Customer complains on X']!);
     console.log(`[dry] customer-complaints-on-x: todo=${cc.length} skipped=${ccDone.length}`);
+    const { todo: ri, done: riDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Recent incidents ( Official )']!);
+    console.log(`[dry] recent-incidents-official: todo=${ri.length} skipped=${riDone.length}`);
     return;
   }
 
@@ -170,8 +183,9 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       });
     }
   }
-  const stage1TodoSurvivors = filterSurvivors('competitorTool', stage1Results, competitorToolGate);
-  const stage1DoneSurvivors = filterCachedSurvivors('competitorTool', stage1Done, attioCache, stage1Slug, competitorToolCacheGate);
+  const { survivors: stage1TodoSurvivors, rejected: stage1TodoRejected } = filterSurvivors('competitorTool', stage1Results, competitorToolGate, competitorToolRejectionReason);
+  const { survivors: stage1DoneSurvivors, rejected: stage1DoneRejected } = filterCachedSurvivors('competitorTool', stage1Done, attioCache, stage1Slug, competitorToolCacheGate, competitorToolCacheRejectionReason);
+  await writeRejectionReasons([...stage1TodoRejected, ...stage1DoneRejected]);
   const survivorsAfterStage1 = [...stage1TodoSurvivors, ...stage1DoneSurvivors];
 
   // Stage 2 — Digital Native
@@ -197,8 +211,9 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     },
   });
 
-  const stage2TodoSurvivors = filterSurvivors('digitalNative', stage2Results, digitalNativeGate);
-  const stage2DoneSurvivors = filterCachedSurvivors('digitalNative', stage2Done, attioCache, stage2Slug, digitalNativeCacheGate);
+  const { survivors: stage2TodoSurvivors, rejected: stage2TodoRejected } = filterSurvivors('digitalNative', stage2Results, digitalNativeGate, digitalNativeRejectionReason);
+  const { survivors: stage2DoneSurvivors, rejected: stage2DoneRejected } = filterCachedSurvivors('digitalNative', stage2Done, attioCache, stage2Slug, digitalNativeCacheGate, digitalNativeCacheRejectionReason);
+  await writeRejectionReasons([...stage2TodoRejected, ...stage2DoneRejected]);
   const survivorsAfterStage2 = [...stage2TodoSurvivors, ...stage2DoneSurvivors];
 
   // Stage 3 — Number of Users (conditional gate: Digital-native B2B companies must have >= 100k users)
@@ -229,18 +244,36 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     const dnCategory = getDigitalNativeCategoryFromCached(attioCache.get(domain)?.[dnSlug] ?? '');
     if (dnCategory !== 'Digital-native B2B') return true;
     if (hadError) return true;
-    if (numeric === null) return false;
+    if (numeric === null || numeric === 0) return true;
     return numeric >= 100000;
   }
 
-  const stage3TodoSurvivors = stage3Results
-    .filter((r) => userCountPassesGate(r.company.domain, r.error === undefined ? r.data.user_count_numeric : null, r.error !== undefined))
-    .map((r) => r.company);
-  const stage3DoneSurvivors = stage3Done.filter((c) =>
-    userCountPassesGate(c.domain, extractUserCountNumericFromCached(attioCache.get(c.domain)?.[stage3Slug] ?? ''), false)
-  );
-  const stage3Rejected = stage3Results.length + stage3Done.length - stage3TodoSurvivors.length - stage3DoneSurvivors.length;
-  console.log(`[numberOfUsers] passed=${stage3TodoSurvivors.length + stage3DoneSurvivors.length} rejected=${stage3Rejected}`);
+  const stage3TodoSurvivors: StageCompany[] = [];
+  const stage3TodoRejected: Array<{ company: StageCompany; reason: string }> = [];
+  for (const r of stage3Results) {
+    if (r.error !== undefined) {
+      stage3TodoSurvivors.push(r.company);
+      continue;
+    }
+    if (userCountPassesGate(r.company.domain, r.data.user_count_numeric, false)) {
+      stage3TodoSurvivors.push(r.company);
+    } else {
+      stage3TodoRejected.push({ company: r.company, reason: numberOfUsersRejectionReason(r.data.user_count_numeric) });
+    }
+  }
+  const stage3DoneSurvivors: StageCompany[] = [];
+  const stage3DoneRejected: Array<{ company: StageCompany; reason: string }> = [];
+  for (const c of stage3Done) {
+    const numeric = extractUserCountNumericFromCached(attioCache.get(c.domain)?.[stage3Slug] ?? '');
+    if (userCountPassesGate(c.domain, numeric, false)) {
+      stage3DoneSurvivors.push(c);
+    } else {
+      stage3DoneRejected.push({ company: c, reason: numberOfUsersRejectionReason(numeric ?? 0) });
+    }
+  }
+  const stage3TotalRejected = stage3TodoRejected.length + stage3DoneRejected.length;
+  console.log(`[numberOfUsers] passed=${stage3TodoSurvivors.length + stage3DoneSurvivors.length} rejected=${stage3TotalRejected}`);
+  await writeRejectionReasons([...stage3TodoRejected, ...stage3DoneRejected]);
   const survivorsAfterStage3 = [...stage3TodoSurvivors, ...stage3DoneSurvivors];
 
   // Stage 4 — Observability Tool
@@ -266,8 +299,9 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     },
   });
 
-  const stage4TodoSurvivors = filterSurvivors('observabilityTool', stage4Results, observabilityToolGate);
-  const stage4DoneSurvivors = filterCachedSurvivors('observabilityTool', stage4Done, attioCache, stage4Slug, observabilityToolCacheGate);
+  const { survivors: stage4TodoSurvivors, rejected: stage4TodoRejected } = filterSurvivors('observabilityTool', stage4Results, observabilityToolGate, observabilityToolRejectionReason);
+  const { survivors: stage4DoneSurvivors, rejected: stage4DoneRejected } = filterCachedSurvivors('observabilityTool', stage4Done, attioCache, stage4Slug, observabilityToolCacheGate, observabilityToolCacheRejectionReason);
+  await writeRejectionReasons([...stage4TodoRejected, ...stage4DoneRejected]);
   const survivorsAfterStage4 = [...stage4TodoSurvivors, ...stage4DoneSurvivors];
 
   // Stage 5 — Communication Tool
@@ -313,8 +347,9 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     },
   });
 
-  const stage5TodoSurvivors = filterSurvivors('communicationTool', stage5Results, communicationToolGate);
-  const stage5DoneSurvivors = filterCachedSurvivors('communicationTool', stage5Done, attioCache, stage5Slug, communicationToolCacheGate);
+  const { survivors: stage5TodoSurvivors, rejected: stage5TodoRejected } = filterSurvivors('communicationTool', stage5Results, communicationToolGate, communicationToolRejectionReason);
+  const { survivors: stage5DoneSurvivors, rejected: stage5DoneRejected } = filterCachedSurvivors('communicationTool', stage5Done, attioCache, stage5Slug, communicationToolCacheGate, communicationToolCacheRejectionReason);
+  await writeRejectionReasons([...stage5TodoRejected, ...stage5DoneRejected]);
   const survivorsAfterStage5 = [...stage5TodoSurvivors, ...stage5DoneSurvivors];
 
   // Stage 6 — Cloud Tool
@@ -340,8 +375,9 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     },
   });
 
-  const stage6TodoSurvivors = filterSurvivors('cloudTool', stage6Results, cloudToolGate);
-  const stage6DoneSurvivors = filterCachedSurvivors('cloudTool', stage6Done, attioCache, stage6Slug, cloudToolCacheGate);
+  const { survivors: stage6TodoSurvivors, rejected: stage6TodoRejected } = filterSurvivors('cloudTool', stage6Results, cloudToolGate, cloudToolRejectionReason);
+  const { survivors: stage6DoneSurvivors, rejected: stage6DoneRejected } = filterCachedSurvivors('cloudTool', stage6Done, attioCache, stage6Slug, cloudToolCacheGate, cloudToolCacheRejectionReason);
+  await writeRejectionReasons([...stage6TodoRejected, ...stage6DoneRejected]);
   const survivorsAfterStage6 = [...stage6TodoSurvivors, ...stage6DoneSurvivors];
 
   console.log(`\n[enrich-all] survivors after all gating stages (${survivorsAfterStage6.length}):`);
@@ -522,6 +558,35 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, { ...existing, [stage13Slug]: formatCustomerComplaintsForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // Stage 14 — Recent incidents ( Official ) (non-gating, data collection only)
+  const stage14Slug = FIELD_SLUGS['Recent incidents ( Official )']!;
+  const { todo: stage14Todo, done: stage14Done } = splitByCache(survivorsAfterStage6, attioCache, stage14Slug);
+  console.log(`[recentIncidents] todo=${stage14Todo.length} skipped=${stage14Done.length}`);
+
+  const companyNameByDomain14 = new Map(stage14Todo.map((c) => [c.domain, c.companyName]));
+
+  await runStage<StatuspageFetchOutcome, RecentIncidentsData>({
+    name: 'recentIncidents',
+    companies: stage14Todo,
+    batchSize: 1,
+    retry: { tries: STATUSPAGE_RETRY_TRIES, baseMs: STATUSPAGE_RETRY_BASE_MS },
+    call: (domains) => {
+      const domain = domains[0]!;
+      const name = companyNameByDomain14.get(domain) ?? '';
+      return fetchRecentIncidents(domain, name);
+    },
+    parse: (raw, batch) => parseRecentIncidentsResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Recent incidents ( Official )', batchResults, formatRecentIncidentsForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage14Slug]: formatRecentIncidentsForAttio(r.data) });
         }
       }
     },
