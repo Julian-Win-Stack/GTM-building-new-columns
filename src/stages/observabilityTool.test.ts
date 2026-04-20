@@ -17,10 +17,18 @@ vi.mock('../rateLimit.js', () => ({
   openaiLimit: vi.fn((fn: () => unknown) => fn()),
   attioWriteLimit: vi.fn((fn: () => unknown) => fn()),
   scheduleExa: vi.fn((fn: () => unknown) => fn()),
+  scheduleTheirstack: vi.fn((fn: () => unknown) => fn()),
 }));
 
+vi.mock('../apis/theirstack.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../apis/theirstack.js')>();
+  return { ...actual, theirstackJobsByAnySlugs: vi.fn() };
+});
+
 import { judge } from '../apis/openai.js';
+import { theirstackJobsByAnySlugs } from '../apis/theirstack.js';
 const mockJudge = vi.mocked(judge);
+const mockTheirStack = vi.mocked(theirstackJobsByAnySlugs);
 
 function makeRaw(
   content: unknown,
@@ -44,6 +52,8 @@ const co2: StageCompany = { domain: 'remitly.com', companyName: 'Remitly' };
 
 beforeEach(() => {
   mockJudge.mockReset();
+  mockTheirStack.mockReset();
+  mockTheirStack.mockResolvedValue({ data: [] });
 });
 
 describe('parseObservabilityToolResponse', () => {
@@ -403,6 +413,94 @@ describe('formatObservabilityToolForAttio', () => {
       ],
     };
     expect(formatObservabilityToolForAttio(data)).toBe('Datadog: https://a.com\nGrafana: https://b.com');
+  });
+});
+
+describe('parseObservabilityToolResponse — TheirStack fallback', () => {
+  function makeTheirStackJob(slugs: string[], sourceUrl = 'https://jobs.ts.com/1') {
+    return { data: [{ source_url: sourceUrl, technology_slugs: slugs }] };
+  }
+
+  it('Scenario 1: Exa finds Datadog — no TheirStack call made', async () => {
+    const raw = makeRaw({
+      companies: [{ domain: 'quizlet.com', toolsText: 'Datadog: https://jobs.example.com/1' }],
+    });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).not.toHaveBeenCalled();
+    expect(results[0]!.data!.tools[0]!.name).toBe('Datadog');
+  });
+
+  it('Scenario 2: Exa finds New Relic only, TheirStack returns Datadog → tool added, gate passes', async () => {
+    mockTheirStack.mockResolvedValueOnce(makeTheirStackJob(['datadog']));
+    const raw = makeRaw({
+      companies: [{ domain: 'quizlet.com', toolsText: 'New Relic: https://jobs.example.com/nr' }],
+    });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalledOnce();
+    const names = results[0]!.data!.tools.map((t) => t.name);
+    expect(names).toContain('Datadog');
+    expect(names).toContain('New Relic');
+    expect(observabilityToolGate(results[0]!.data!)).toBe(true);
+  });
+
+  it('Scenario 2: Exa finds New Relic only, TheirStack returns nothing → gate still fails', async () => {
+    const raw = makeRaw({
+      companies: [{ domain: 'quizlet.com', toolsText: 'New Relic: https://jobs.example.com/nr' }],
+    });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalledOnce();
+    expect(results[0]!.data!.tools.map((t) => t.name)).toEqual(['New Relic']);
+    expect(observabilityToolGate(results[0]!.data!)).toBe(false);
+  });
+
+  it('Scenario 2: Exa finds other tools, TheirStack gate call returns both Datadog and Grafana → both added', async () => {
+    mockTheirStack.mockResolvedValueOnce(makeTheirStackJob(['datadog', 'grafana']));
+    const raw = makeRaw({
+      companies: [{ domain: 'quizlet.com', toolsText: 'Dynatrace: https://jobs.example.com/dyna' }],
+    });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalledOnce();
+    const names = results[0]!.data!.tools.map((t) => t.name);
+    expect(names).toContain('Datadog');
+    expect(names).toContain('Grafana');
+  });
+
+  it('Scenario 3: Exa empty, TheirStack gate call returns Datadog → added, no second call', async () => {
+    mockTheirStack.mockResolvedValueOnce(makeTheirStackJob(['datadog']));
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalledOnce();
+    expect(results[0]!.data!.tools[0]!.name).toBe('Datadog');
+    expect(observabilityToolGate(results[0]!.data!)).toBe(true);
+  });
+
+  it('Scenario 3: Exa empty, gate call empty, second call returns Dynatrace → added, gate fails', async () => {
+    mockTheirStack
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce(makeTheirStackJob(['dynatrace']));
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalledTimes(2);
+    expect(results[0]!.data!.tools[0]!.name).toBe('Dynatrace');
+    expect(observabilityToolGate(results[0]!.data!)).toBe(false);
+  });
+
+  it('Scenario 3: both TheirStack calls empty → tools [], gate passes, formats as No evidence found', async () => {
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalledTimes(2);
+    expect(results[0]!.data!.tools).toHaveLength(0);
+    expect(observabilityToolGate(results[0]!.data!)).toBe(true);
+    expect(formatObservabilityToolForAttio(results[0]!.data!)).toBe('No evidence found');
+  });
+
+  it('Scenario 3: second call returns slug with no source URL → not added', async () => {
+    mockTheirStack
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: [{ technology_slugs: ['dynatrace'] }] });
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(results[0]!.data!.tools).toHaveLength(0);
   });
 });
 

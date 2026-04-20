@@ -1,6 +1,7 @@
 import type { ExaSearchResponse } from '../apis/exa.js';
+import { collectJobUrls, theirstackJobsByAnySlugs } from '../apis/theirstack.js';
 import { judge } from '../apis/openai.js';
-import { openaiLimit } from '../rateLimit.js';
+import { openaiLimit, scheduleTheirstack } from '../rateLimit.js';
 import { withRetry } from '../util.js';
 import type { GateRule, StageCompany, StageResult } from './types.js';
 
@@ -9,6 +10,17 @@ export type ObservabilityToolData = {
 };
 
 const ALLOWLIST: ReadonlySet<string> = new Set(['datadog', 'grafana', 'prometheus']);
+
+const THEIRSTACK_GATE_SLUGS = ['datadog', 'grafana'] as const;
+const THEIRSTACK_OTHER_SLUGS = [
+  'chronosphere', 'coralogix', 'dynatrace', 'honeycomb', 'netdata', 'new-relic',
+] as const;
+const SLUG_DISPLAY: Record<string, string> = {
+  datadog: 'Datadog', grafana: 'Grafana',
+  chronosphere: 'Chronosphere', coralogix: 'Coralogix',
+  dynatrace: 'Dynatrace', honeycomb: 'Honeycomb',
+  netdata: 'Netdata', 'new-relic': 'New Relic',
+};
 
 const LINKEDIN_VERIFIER_SYSTEM = `You are a strict evidence verifier.
 
@@ -150,6 +162,21 @@ function parseToolsText(
   return [...priority, ...rest];
 }
 
+async function fetchTheirStackTools(
+  domain: string,
+  slugs: readonly string[]
+): Promise<Array<{ name: string; sourceUrl: string }>> {
+  const res = await scheduleTheirstack(() => theirstackJobsByAnySlugs(domain, [...slugs]));
+  const job = res.data?.[0];
+  if (!job) return [];
+  const techSlugs = job.technology_slugs ?? [];
+  const sourceUrl = collectJobUrls(job);
+  if (!sourceUrl) return [];
+  return slugs
+    .filter((s) => techSlugs.includes(s))
+    .map((s) => ({ name: SLUG_DISPLAY[s] ?? s, sourceUrl }));
+}
+
 export async function parseObservabilityToolResponse(
   raw: ExaSearchResponse,
   companies: StageCompany[]
@@ -204,6 +231,23 @@ export async function parseObservabilityToolResponse(
         console.log(`[observabilityTool] ${company.domain}: ${dropped.length} linkedin profile tool(s) dropped`);
         for (const d of dropped) {
           console.log(`  ✗ ${d.tool.name} → ${d.tool.sourceUrl} — ${d.reason}`);
+        }
+      }
+
+      const hasAllowlist = verified.some((t) => ALLOWLIST.has(t.name.toLowerCase()));
+      const hasOtherTools = verified.length > 0 && !hasAllowlist;
+
+      if (!hasAllowlist) {
+        const gateTs = await fetchTheirStackTools(company.domain, THEIRSTACK_GATE_SLUGS);
+        if (gateTs.length > 0) {
+          console.log(`[observabilityTool] ${company.domain}: TheirStack gate call found ${gateTs.map((t) => t.name).join(', ')}`);
+          verified.push(...gateTs);
+        } else if (!hasOtherTools) {
+          const otherTs = await fetchTheirStackTools(company.domain, THEIRSTACK_OTHER_SLUGS);
+          if (otherTs.length > 0) {
+            console.log(`[observabilityTool] ${company.domain}: TheirStack other call found ${otherTs.map((t) => t.name).join(', ')}`);
+            verified.push(...otherTs);
+          }
         }
       }
 

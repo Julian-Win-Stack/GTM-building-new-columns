@@ -1,7 +1,7 @@
 import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch } from '../apis/exa.js';
-import { theirstackJobsByTechnology } from '../apis/theirstack.js';
+import { collectJobUrls, theirstackJobsByTechnology } from '../apis/theirstack.js';
 import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi } from '../rateLimit.js';
 import { deriveDomain, normalizeLinkedInUrl } from '../util.js';
 import type { InputRow } from '../types.js';
@@ -241,15 +241,17 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       const domain = domains[0]!;
       const slackRes = await scheduleTheirstack(() => theirstackJobsByTechnology(domain, 'slack'));
       const slackJob = slackRes.data?.[0];
-      if (slackJob?.source_url) {
-        return { domain, tool: 'Slack', sourceUrl: slackJob.source_url };
+      if (slackJob) {
+        const sourceUrl = collectJobUrls(slackJob);
+        if (sourceUrl) return { domain, tool: 'Slack', sourceUrl };
       }
       const teamsRes = await scheduleTheirstack(() =>
         theirstackJobsByTechnology(domain, 'microsoft-teams')
       );
       const teamsJob = teamsRes.data?.[0];
-      if (teamsJob?.source_url) {
-        return { domain, tool: 'Microsoft Teams', sourceUrl: teamsJob.source_url };
+      if (teamsJob) {
+        const sourceUrl = collectJobUrls(teamsJob);
+        if (sourceUrl) return { domain, tool: 'Microsoft Teams', sourceUrl };
       }
       return { domain, tool: null, sourceUrl: null };
     },
