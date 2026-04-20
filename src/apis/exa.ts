@@ -493,6 +493,7 @@ Only collapse them if the company is purely paid with no free tier.
 For each input company domain, return exactly one entry in companies[] with:
 - domain: the exact domain provided (lowercase, no www.)
 - user_count: the count, always with units (see Step 3 examples). Prefer "~N units (estimated)" when inferred.
+- user_count_numeric: the integer best estimate of the total user count using the largest meaningful denominator (prefer MAU/registered users over paying customers when both are known). Set to 0 only when user_count is "Insufficient data".
 - reasoning: 2–4 sentences showing the signals used and the math when inferred
 - source_link: the URL of the strongest supporting source used (source_link: for direct disclosures, link to the exact source. For inferred estimates, link to the single strongest signal used (e.g. the funding announcement if ARR multiple was the key input, the LinkedIn page if headcount was primary).)
 - source_date: the publication or "as-of" date of the source in source_link. Use ISO 8601 when an exact date is known (e.g. "2024-03-15"); use a month/quarter/year when the source is less precise (e.g. "March 2024", "Q1 2024", "2024"). Return "" only when no date can be determined from the source.
@@ -512,12 +513,13 @@ const NUMBER_OF_USERS_OBJECT_SCHEMA = {
         properties: {
           domain: { type: 'string' },
           user_count: { type: 'string' },
+          user_count_numeric: { type: 'integer' },
           reasoning: { type: 'string' },
           source_link: { type: 'string' },
           source_date: { type: 'string' },
           confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
         },
-        required: ['domain', 'user_count', 'reasoning', 'source_link', 'source_date', 'confidence'],
+        required: ['domain', 'user_count', 'user_count_numeric', 'reasoning', 'source_link', 'source_date', 'confidence'],
       },
     },
   },

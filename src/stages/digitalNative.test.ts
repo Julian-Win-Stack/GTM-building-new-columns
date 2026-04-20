@@ -4,6 +4,7 @@ import {
   digitalNativeGate,
   formatDigitalNativeForAttio,
   digitalNativeCacheGate,
+  getDigitalNativeCategoryFromCached,
   type DigitalNativeData,
 } from './digitalNative.js';
 import type { ExaSearchResponse } from '../apis/exa.js';
@@ -249,5 +250,28 @@ describe('digitalNativeCacheGate', () => {
 
   it('rejects an empty cached value', () => {
     expect(digitalNativeCacheGate('')).toBe(false);
+  });
+});
+
+describe('getDigitalNativeCategoryFromCached', () => {
+  it('returns the category from the first line of a formatted Attio value', () => {
+    const cached = 'Digital-native B2B\n\nConfidence: High\n\nReasoning: sells to businesses';
+    expect(getDigitalNativeCategoryFromCached(cached)).toBe('Digital-native B2B');
+  });
+
+  it('returns Digital-native B2C', () => {
+    expect(getDigitalNativeCategoryFromCached('Digital-native B2C\n\nConfidence: High\n\nReasoning: ...')).toBe('Digital-native B2C');
+  });
+
+  it('returns NOT Digital-native', () => {
+    expect(getDigitalNativeCategoryFromCached('NOT Digital-native\n\nConfidence: High\n\nReasoning: ...')).toBe('NOT Digital-native');
+  });
+
+  it('returns null for an unrecognised first line', () => {
+    expect(getDigitalNativeCategoryFromCached('Some random text')).toBeNull();
+  });
+
+  it('returns null for an empty string', () => {
+    expect(getDigitalNativeCategoryFromCached('')).toBeNull();
   });
 });

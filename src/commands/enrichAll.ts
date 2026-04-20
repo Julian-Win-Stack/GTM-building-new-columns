@@ -14,6 +14,7 @@ import {
   digitalNativeGate,
   formatDigitalNativeForAttio,
   digitalNativeCacheGate,
+  getDigitalNativeCategoryFromCached,
 } from '../stages/digitalNative.js';
 import {
   parseObservabilityToolResponse,
@@ -44,7 +45,7 @@ import {
 } from '../stages/cloudTool.js';
 import { parseFundingGrowthResponse, formatFundingGrowthForAttio } from '../stages/fundingGrowth.js';
 import { parseRevenueGrowthResponse, formatRevenueGrowthForAttio } from '../stages/revenueGrowth.js';
-import { parseNumberOfUsersResponse, formatNumberOfUsersForAttio } from '../stages/numberOfUsers.js';
+import { parseNumberOfUsersResponse, formatNumberOfUsersForAttio, extractUserCountNumericFromCached } from '../stages/numberOfUsers.js';
 import { apolloMixedPeopleApiSearch } from '../apis/apollo.js';
 import { parseNumberOfEngineersResponse, formatNumberOfEngineersForAttio, ENGINEER_TITLES } from '../stages/numberOfEngineers.js';
 import { parseNumberOfSresResponse, formatNumberOfSresForAttio, SRE_TITLES, type NumberOfSresData } from '../stages/numberOfSres.js';
@@ -133,6 +134,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       const batch = dn.slice(i, i + 2);
       console.log(`[dry]   batch: ${batch.map((c) => c.domain).join(', ')}`);
     }
+    const { todo: nou, done: nouDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Number of Users']!);
+    console.log(`[dry] number-of-users (stage 3, conditional B2B gate): todo=${nou.length} skipped=${nouDone.length}`);
     const { todo: obs, done: obsDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Observability Tool']!);
     console.log(`[dry] observability-tool: todo=${obs.length} skipped=${obsDone.length}`);
     const { todo: comm, done: commDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Communication Tool']!);
@@ -143,8 +146,6 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     console.log(`[dry] funding-growth: todo=${fg.length} skipped=${fgDone.length}`);
     const { todo: rg, done: rgDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Revenue Growth']!);
     console.log(`[dry] revenue-growth: todo=${rg.length} skipped=${rgDone.length}`);
-    const { todo: nou, done: nouDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Number of Users']!);
-    console.log(`[dry] number-of-users: todo=${nou.length} skipped=${nouDone.length}`);
     const { todo: cc, done: ccDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Customer complains on X']!);
     console.log(`[dry] customer-complaints-on-x: todo=${cc.length} skipped=${ccDone.length}`);
     return;
@@ -200,14 +201,56 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const stage2DoneSurvivors = filterCachedSurvivors('digitalNative', stage2Done, attioCache, stage2Slug, digitalNativeCacheGate);
   const survivorsAfterStage2 = [...stage2TodoSurvivors, ...stage2DoneSurvivors];
 
-  // Stage 3 — Observability Tool
-  const stage3Slug = FIELD_SLUGS['Observability Tool']!;
+  // Stage 3 — Number of Users (conditional gate: Digital-native B2B companies must have >= 100k users)
+  const stage3Slug = FIELD_SLUGS['Number of Users']!;
+  const dnSlug = FIELD_SLUGS['Digital Native']!;
   const { todo: stage3Todo, done: stage3Done } = splitByCache(survivorsAfterStage2, attioCache, stage3Slug);
-  console.log(`[observabilityTool] todo=${stage3Todo.length} skipped=${stage3Done.length}`);
+  console.log(`[numberOfUsers] todo=${stage3Todo.length} skipped=${stage3Done.length}`);
 
   const stage3Results = await runStage({
-    name: 'observabilityTool',
+    name: 'numberOfUsers',
     companies: stage3Todo,
+    batchSize: 2,
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => scheduleExa(() => numberOfUsersExaSearch(domains)),
+    parse: (raw, batch) => parseNumberOfUsersResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Number of Users', batchResults, formatNumberOfUsersForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage3Slug]: formatNumberOfUsersForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  function userCountPassesGate(domain: string, numeric: number | null, hadError: boolean): boolean {
+    const dnCategory = getDigitalNativeCategoryFromCached(attioCache.get(domain)?.[dnSlug] ?? '');
+    if (dnCategory !== 'Digital-native B2B') return true;
+    if (hadError) return true;
+    if (numeric === null) return false;
+    return numeric >= 100000;
+  }
+
+  const stage3TodoSurvivors = stage3Results
+    .filter((r) => userCountPassesGate(r.company.domain, r.error === undefined ? r.data.user_count_numeric : null, r.error !== undefined))
+    .map((r) => r.company);
+  const stage3DoneSurvivors = stage3Done.filter((c) =>
+    userCountPassesGate(c.domain, extractUserCountNumericFromCached(attioCache.get(c.domain)?.[stage3Slug] ?? ''), false)
+  );
+  const stage3Rejected = stage3Results.length + stage3Done.length - stage3TodoSurvivors.length - stage3DoneSurvivors.length;
+  console.log(`[numberOfUsers] passed=${stage3TodoSurvivors.length + stage3DoneSurvivors.length} rejected=${stage3Rejected}`);
+  const survivorsAfterStage3 = [...stage3TodoSurvivors, ...stage3DoneSurvivors];
+
+  // Stage 4 — Observability Tool
+  const stage4Slug = FIELD_SLUGS['Observability Tool']!;
+  const { todo: stage4Todo, done: stage4Done } = splitByCache(survivorsAfterStage3, attioCache, stage4Slug);
+  console.log(`[observabilityTool] todo=${stage4Todo.length} skipped=${stage4Done.length}`);
+
+  const stage4Results = await runStage({
+    name: 'observabilityTool',
+    companies: stage4Todo,
     batchSize: 2,
     retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
     call: (domains) => scheduleExa(() => observabilityToolExaSearch(domains)),
@@ -217,24 +260,24 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       for (const r of batchResults) {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
-          attioCache.set(r.company.domain, { ...existing, [stage3Slug]: formatObservabilityToolForAttio(r.data) });
+          attioCache.set(r.company.domain, { ...existing, [stage4Slug]: formatObservabilityToolForAttio(r.data) });
         }
       }
     },
   });
 
-  const stage3TodoSurvivors = filterSurvivors('observabilityTool', stage3Results, observabilityToolGate);
-  const stage3DoneSurvivors = filterCachedSurvivors('observabilityTool', stage3Done, attioCache, stage3Slug, observabilityToolCacheGate);
-  const survivorsAfterStage3 = [...stage3TodoSurvivors, ...stage3DoneSurvivors];
+  const stage4TodoSurvivors = filterSurvivors('observabilityTool', stage4Results, observabilityToolGate);
+  const stage4DoneSurvivors = filterCachedSurvivors('observabilityTool', stage4Done, attioCache, stage4Slug, observabilityToolCacheGate);
+  const survivorsAfterStage4 = [...stage4TodoSurvivors, ...stage4DoneSurvivors];
 
-  // Stage 4 — Communication Tool
-  const stage4Slug = FIELD_SLUGS['Communication Tool']!;
-  const { todo: stage4Todo, done: stage4Done } = splitByCache(survivorsAfterStage3, attioCache, stage4Slug);
-  console.log(`[communicationTool] todo=${stage4Todo.length} skipped=${stage4Done.length}`);
+  // Stage 5 — Communication Tool
+  const stage5Slug = FIELD_SLUGS['Communication Tool']!;
+  const { todo: stage5Todo, done: stage5Done } = splitByCache(survivorsAfterStage4, attioCache, stage5Slug);
+  console.log(`[communicationTool] todo=${stage5Todo.length} skipped=${stage5Done.length}`);
 
-  const stage4Results = await runStage<CommunicationToolRaw, CommunicationToolData>({
+  const stage5Results = await runStage<CommunicationToolRaw, CommunicationToolData>({
     name: 'communicationTool',
-    companies: stage4Todo,
+    companies: stage5Todo,
     batchSize: 1,
     retry: { tries: THEIRSTACK_RETRY_TRIES, baseMs: THEIRSTACK_RETRY_BASE_MS },
     call: async (domains) => {
@@ -263,25 +306,25 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, {
             ...existing,
-            [stage4Slug]: formatCommunicationToolForAttio(r.data),
+            [stage5Slug]: formatCommunicationToolForAttio(r.data),
           });
         }
       }
     },
   });
 
-  const stage4TodoSurvivors = filterSurvivors('communicationTool', stage4Results, communicationToolGate);
-  const stage4DoneSurvivors = filterCachedSurvivors('communicationTool', stage4Done, attioCache, stage4Slug, communicationToolCacheGate);
-  const survivorsAfterStage4 = [...stage4TodoSurvivors, ...stage4DoneSurvivors];
+  const stage5TodoSurvivors = filterSurvivors('communicationTool', stage5Results, communicationToolGate);
+  const stage5DoneSurvivors = filterCachedSurvivors('communicationTool', stage5Done, attioCache, stage5Slug, communicationToolCacheGate);
+  const survivorsAfterStage5 = [...stage5TodoSurvivors, ...stage5DoneSurvivors];
 
-  // Stage 5 — Cloud Tool
-  const stage5Slug = FIELD_SLUGS['Cloud Tool']!;
-  const { todo: stage5Todo, done: stage5Done } = splitByCache(survivorsAfterStage4, attioCache, stage5Slug);
-  console.log(`[cloudTool] todo=${stage5Todo.length} skipped=${stage5Done.length}`);
+  // Stage 6 — Cloud Tool
+  const stage6Slug = FIELD_SLUGS['Cloud Tool']!;
+  const { todo: stage6Todo, done: stage6Done } = splitByCache(survivorsAfterStage5, attioCache, stage6Slug);
+  console.log(`[cloudTool] todo=${stage6Todo.length} skipped=${stage6Done.length}`);
 
-  const stage5Results = await runStage({
+  const stage6Results = await runStage({
     name: 'cloudTool',
-    companies: stage5Todo,
+    companies: stage6Todo,
     batchSize: 2,
     retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
     call: (domains) => scheduleExa(() => cloudToolExaSearch(domains)),
@@ -291,27 +334,27 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       for (const r of batchResults) {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
-          attioCache.set(r.company.domain, { ...existing, [stage5Slug]: formatCloudToolForAttio(r.data) });
+          attioCache.set(r.company.domain, { ...existing, [stage6Slug]: formatCloudToolForAttio(r.data) });
         }
       }
     },
   });
 
-  const stage5TodoSurvivors = filterSurvivors('cloudTool', stage5Results, cloudToolGate);
-  const stage5DoneSurvivors = filterCachedSurvivors('cloudTool', stage5Done, attioCache, stage5Slug, cloudToolCacheGate);
-  const survivorsAfterStage5 = [...stage5TodoSurvivors, ...stage5DoneSurvivors];
+  const stage6TodoSurvivors = filterSurvivors('cloudTool', stage6Results, cloudToolGate);
+  const stage6DoneSurvivors = filterCachedSurvivors('cloudTool', stage6Done, attioCache, stage6Slug, cloudToolCacheGate);
+  const survivorsAfterStage6 = [...stage6TodoSurvivors, ...stage6DoneSurvivors];
 
-  console.log(`\n[enrich-all] survivors after stage 5 (${survivorsAfterStage5.length}):`);
-  for (const c of survivorsAfterStage5) console.log(`  ${c.domain}  (${c.companyName})`);
+  console.log(`\n[enrich-all] survivors after all gating stages (${survivorsAfterStage6.length}):`);
+  for (const c of survivorsAfterStage6) console.log(`  ${c.domain}  (${c.companyName})`);
 
-  // Stage 6 — Funding Growth (non-gating, data collection only)
-  const stage6Slug = FIELD_SLUGS['Funding Growth']!;
-  const { todo: stage6Todo, done: stage6Done } = splitByCache(survivorsAfterStage5, attioCache, stage6Slug);
-  console.log(`[fundingGrowth] todo=${stage6Todo.length} skipped=${stage6Done.length}`);
+  // Stage 7 — Funding Growth (non-gating, data collection only)
+  const stage7Slug = FIELD_SLUGS['Funding Growth']!;
+  const { todo: stage7Todo, done: stage7Done } = splitByCache(survivorsAfterStage6, attioCache, stage7Slug);
+  console.log(`[fundingGrowth] todo=${stage7Todo.length} skipped=${stage7Done.length}`);
 
   await runStage({
     name: 'fundingGrowth',
-    companies: stage6Todo,
+    companies: stage7Todo,
     batchSize: 2,
     retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
     call: (domains) => scheduleExa(() => fundingGrowthExaSearch(domains)),
@@ -321,20 +364,20 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       for (const r of batchResults) {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
-          attioCache.set(r.company.domain, { ...existing, [stage6Slug]: formatFundingGrowthForAttio(r.data) });
+          attioCache.set(r.company.domain, { ...existing, [stage7Slug]: formatFundingGrowthForAttio(r.data) });
         }
       }
     },
   });
 
-  // Stage 7 — Revenue Growth (non-gating, data collection only)
-  const stage7Slug = FIELD_SLUGS['Revenue Growth']!;
-  const { todo: stage7Todo, done: stage7Done } = splitByCache(survivorsAfterStage5, attioCache, stage7Slug);
-  console.log(`[revenueGrowth] todo=${stage7Todo.length} skipped=${stage7Done.length}`);
+  // Stage 8 — Revenue Growth (non-gating, data collection only)
+  const stage8Slug = FIELD_SLUGS['Revenue Growth']!;
+  const { todo: stage8Todo, done: stage8Done } = splitByCache(survivorsAfterStage6, attioCache, stage8Slug);
+  console.log(`[revenueGrowth] todo=${stage8Todo.length} skipped=${stage8Done.length}`);
 
   await runStage({
     name: 'revenueGrowth',
-    companies: stage7Todo,
+    companies: stage8Todo,
     batchSize: 2,
     retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
     call: (domains) => scheduleExa(() => revenueGrowthExaSearch(domains)),
@@ -344,30 +387,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       for (const r of batchResults) {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
-          attioCache.set(r.company.domain, { ...existing, [stage7Slug]: formatRevenueGrowthForAttio(r.data) });
-        }
-      }
-    },
-  });
-
-  // Stage 8 — Number of Users (non-gating, data collection only)
-  const stage8Slug = FIELD_SLUGS['Number of Users']!;
-  const { todo: stage8Todo, done: stage8Done } = splitByCache(survivorsAfterStage5, attioCache, stage8Slug);
-  console.log(`[numberOfUsers] todo=${stage8Todo.length} skipped=${stage8Done.length}`);
-
-  await runStage({
-    name: 'numberOfUsers',
-    companies: stage8Todo,
-    batchSize: 2,
-    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
-    call: (domains) => scheduleExa(() => numberOfUsersExaSearch(domains)),
-    parse: (raw, batch) => parseNumberOfUsersResponse(raw, batch),
-    afterBatch: async (batchResults) => {
-      await writeStageColumn('Number of Users', batchResults, formatNumberOfUsersForAttio);
-      for (const r of batchResults) {
-        if (r.error === undefined) {
-          const existing = attioCache.get(r.company.domain) ?? {};
-          attioCache.set(r.company.domain, { ...existing, [stage8Slug]: formatNumberOfUsersForAttio(r.data) });
+          attioCache.set(r.company.domain, { ...existing, [stage8Slug]: formatRevenueGrowthForAttio(r.data) });
         }
       }
     },
@@ -375,7 +395,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
 
   // Stage 9 — Number of Engineers (non-gating, data collection only)
   const stage9Slug = FIELD_SLUGS['Number of Engineers']!;
-  const { todo: stage9Todo, done: stage9Done } = splitByCache(survivorsAfterStage5, attioCache, stage9Slug);
+  const { todo: stage9Todo, done: stage9Done } = splitByCache(survivorsAfterStage6, attioCache, stage9Slug);
   console.log(`[numberOfEngineers] todo=${stage9Todo.length} skipped=${stage9Done.length}`);
 
   await runStage({
@@ -401,7 +421,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
 
   // Stage 10 — Number of SREs (non-gating, data collection only)
   const stage10Slug = FIELD_SLUGS['Number of SREs']!;
-  const { todo: stage10Todo, done: stage10Done } = splitByCache(survivorsAfterStage5, attioCache, stage10Slug);
+  const { todo: stage10Todo, done: stage10Done } = splitByCache(survivorsAfterStage6, attioCache, stage10Slug);
   console.log(`[numberOfSres] todo=${stage10Todo.length} skipped=${stage10Done.length}`);
 
   const stage10NoLinkedIn = stage10Todo.filter((c) => !linkedinByDomain.has(c.domain));
@@ -445,11 +465,11 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   // Stage 11+12 — Engineer Hiring + SRE Hiring (non-gating, single Apify call feeds both columns)
   const stage11EngSlug = FIELD_SLUGS['Engineer Hiring']!;
   const stage11SreSlug = FIELD_SLUGS['SRE Hiring']!;
-  const stage11Todo = survivorsAfterStage5.filter((c) => {
+  const stage11Todo = survivorsAfterStage6.filter((c) => {
     const cached = attioCache.get(c.domain) ?? {};
     return !cached[stage11EngSlug] || !cached[stage11SreSlug];
   });
-  const stage11Done = survivorsAfterStage5.filter((c) => {
+  const stage11Done = survivorsAfterStage6.filter((c) => {
     const cached = attioCache.get(c.domain) ?? {};
     return !!cached[stage11EngSlug] && !!cached[stage11SreSlug];
   });
@@ -480,7 +500,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
 
   // Stage 13 — Customer complains on X (non-gating, data collection only)
   const stage13Slug = FIELD_SLUGS['Customer complains on X']!;
-  const { todo: stage13Todo, done: stage13Done } = splitByCache(survivorsAfterStage5, attioCache, stage13Slug);
+  const { todo: stage13Todo, done: stage13Done } = splitByCache(survivorsAfterStage6, attioCache, stage13Slug);
   console.log(`[customerComplaintsOnX] todo=${stage13Todo.length} skipped=${stage13Done.length}`);
 
   const companyNameByDomain13 = new Map(stage13Todo.map((c) => [c.domain, c.companyName]));
@@ -507,5 +527,5 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     },
   });
 
-  console.log(`\n[done] total=${companies.length} survivors=${survivorsAfterStage5.length} badDomains=${skippedBadDomain}`);
+  console.log(`\n[done] total=${companies.length} survivors=${survivorsAfterStage6.length} badDomains=${skippedBadDomain}`);
 }

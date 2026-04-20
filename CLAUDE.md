@@ -48,12 +48,12 @@ src/
     types.ts        — StageCompany, StageResult<T>, GateRule<T>
     competitorTool.ts   — Stage 1: local company-name match against known customer lists, gate (reject if any match), Attio formatter (comma-joined tool names or "Not using any competitor tools")
     digitalNative.ts    — Stage 2: parser (structured JSON), gate, Attio formatter
-    observabilityTool.ts — Stage 3: async parser (structured JSON), LinkedIn profile verification via Azure OpenAI judge(), gate (Datadog/Grafana/Prometheus allowlist), Attio formatter
-    communicationTool.ts — Stage 4: sync parser, two-step TheirStack search (Slack → Microsoft Teams), gate (reject if MS Teams), Attio formatter
-    cloudTool.ts        — Stage 5: parser (structured JSON), gate (pass on AWS/GCP/Both/no-evidence; reject other clouds), Attio formatter (`<Tool>: <url>` or "No evidence found")
-    fundingGrowth.ts    — Stage 6: parser (structured JSON), no gate, Attio formatter (Growth / Timeframe / Evidence multi-line)
-    revenueGrowth.ts    — Stage 7: parser (structured JSON), no gate, Attio formatter (Growth / Evidence / Reasoning / Confidence multi-line)
-    numberOfUsers.ts    — Stage 8: parser (structured JSON), no gate, Attio formatter (User count / Reasoning / Source link multi-line)
+    observabilityTool.ts — Stage 4: async parser (structured JSON), LinkedIn profile verification via Azure OpenAI judge(), gate (Datadog/Grafana/Prometheus allowlist), Attio formatter
+    communicationTool.ts — Stage 5: sync parser, two-step TheirStack search (Slack → Microsoft Teams), gate (reject if MS Teams), Attio formatter
+    cloudTool.ts        — Stage 6: parser (structured JSON), gate (pass on AWS/GCP/Both/no-evidence; reject other clouds), Attio formatter (`<Tool>: <url>` or "No evidence found")
+    fundingGrowth.ts    — Stage 7: parser (structured JSON), no gate, Attio formatter (Growth / Timeframe / Evidence multi-line)
+    revenueGrowth.ts    — Stage 8: parser (structured JSON), no gate, Attio formatter (Growth / Evidence / Reasoning / Confidence multi-line)
+    numberOfUsers.ts    — Stage 3: parser (structured JSON, includes user_count_numeric integer), conditional gate (B2B companies must have user_count_numeric >= 100k), Attio formatter; exports extractUserCountNumericFromCached
     numberOfEngineers.ts — Stage 9: Apollo api_search parser, no gate, Attio formatter (plain integer string e.g. "47"); exports ENGINEER_TITLES
     numberOfSres.ts      — Stage 10: Apify harvestapi parser (counts items), no gate, Attio formatter (plain integer string e.g. "3", or "N/A" when no LinkedIn URL); exports SRE_TITLES
     engineerHiring.ts    — Stage 11+12: Apify career-site-job-listing-feed parser (one call → two columns), no gate, Attio formatters for Engineer Hiring and SRE Hiring; exports ENGINEER_HIRING_TITLE_SEARCH, ENGINEER_HIRING_TITLE_EXCLUSIONS
@@ -105,13 +105,13 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | # | Column | API | Gate (pass condition) |
 |---|---|---|---|
 | 1 | Competitor Tooling | *local match* | company name NOT in any competitor-tool customer list (Resolve.ai, Rootly, Incident.io, FireHydrant, PagerDuty, Opsgenie, xMatters, Splunk On-Call, BigPanda, Moogsoft) |
-| 2 | Digital Native | Exa | category is NOT `NOT Digital-native` (B2B companies continue) |
-| 3 | Observability Tool | Exa | no tool evidence OR at least one of: Datadog, Grafana, Prometheus |
-| 4 | Communication Tool | TheirStack | no evidence OR uses Slack (reject if Microsoft Teams / Microsoft) |
-| 5 | Cloud Tool | Exa | no evidence OR uses AWS OR GCP |
-| 6 | Funding Growth | Exa | no gate — data collection only |
-| 7 | Revenue Growth | Exa | no gate — data collection only |
-| 8 | Number of Users | Exa | no gate — data collection only |
+| 2 | Digital Native | Exa | category is NOT `NOT Digital-native` |
+| 3 | Number of Users | Exa | conditional: for `Digital-native B2B` only — `user_count_numeric` (from Exa schema) must be >= 100,000; non-B2B and fetch errors pass unconditionally |
+| 4 | Observability Tool | Exa | no tool evidence OR at least one of: Datadog, Grafana, Prometheus |
+| 5 | Communication Tool | TheirStack | no evidence OR uses Slack (reject if Microsoft Teams / Microsoft) |
+| 6 | Cloud Tool | Exa | no evidence OR uses AWS OR GCP |
+| 7 | Funding Growth | Exa | no gate — data collection only |
+| 8 | Revenue Growth | Exa | no gate — data collection only |
 | 9 | Number of Engineers | Apollo | no gate — data collection only |
 | 10 | Number of SREs | Apify | no gate — data collection only |
 | 11 | Engineer Hiring | Apify | no gate — data collection only |
@@ -119,7 +119,7 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 13 | Customer complains on X | twitterapi.io + Azure OpenAI | no gate — data collection only |
 | 14–16 | remaining columns | various | no gate — data collection only |
 
-Stages 1–5 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing.
+Stages 1–6 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing.
 
 Stage 1 (Competitor Tooling) is purely local — no API call, no rate limit. Matching is case-insensitive exact match on the trimmed CSV company name against the per-tool customer lists in `src/stages/competitorTool.ts:COMPETITOR_TOOLS`. To update the list, edit that constant directly.
 
@@ -220,6 +220,7 @@ Source date: <ISO date or month/quarter/year, e.g. "2024-03-15" or "Q1 2024">
 Confidence: <high | medium | low>
 ```
 If reasoning, source_link, or source_date are empty, those lines are omitted. Confidence is always present. Exa is required to infer a numeric estimate from proxy signals (ARR ÷ ACV, headcount, traffic, app downloads, funding stage) when no exact count is publicly disclosed — `"Insufficient data"` is reserved for the rare case of zero usable signals.
+Stage 3 gate: Exa returns `user_count_numeric` (integer). For `Digital-native B2B` companies, the gate passes only if `user_count_numeric >= 100000`. Non-B2B categories pass unconditionally. Fetch errors pass (transient). `user_count_numeric = 0` (Insufficient data) → reject.
 
 **Number of Engineers** — plain integer as string (e.g. `47` or `0`). `0` is written when Apollo returns no matches — do not leave blank.
 
@@ -263,7 +264,7 @@ Tweets fetched via twitterapi.io GET `/twitter/tweet/advanced_search` (query: `@
 
 **LinkedIn Page** — written once at pipeline start (pre-flight, before Stage 1) for companies that have no existing Attio record. Value comes directly from the `Company Linkedin Url` column in the input CSV. Not written for companies already in Attio.
 
-Stages 6–13 run on `survivorsAfterStage5` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
+Stages 7–13 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
 
 Stages 11 and 12 share a single `runStage` invocation (one Apify call per company) whose `afterBatch` writes both Engineer Hiring and SRE Hiring columns. Cache-skip requires both slugs to be non-empty; either blank triggers a fresh call.
 
@@ -272,7 +273,7 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 
 ### API mapping
 - **Local match (no API)**: Competitor Tooling
-- **Exa (batch of 2)**: Digital Native, Observability Tool, Cloud Tool, Funding Growth, Revenue Growth, Number of Users
+- **Exa (batch of 2)**: Digital Native, Number of Users, Observability Tool, Cloud Tool, Funding Growth, Revenue Growth
 - **TheirStack**: Communication Tool
 - **Apollo**: Number of Engineers
 - **Apify (harvestapi/linkedin-company-employees)**: Number of SREs

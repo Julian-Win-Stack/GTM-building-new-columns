@@ -81,7 +81,12 @@ export function formatDigitalNativeForAttio(d: DigitalNativeData): string {
 }
 
 export const digitalNativeCacheGate = (cached: string): boolean => {
-  const firstLine = cached.split('\n')[0]?.trim() ?? '';
-  if (!firstLine) return false;
-  return firstLine !== 'NOT Digital-native';
+  const category = getDigitalNativeCategoryFromCached(cached);
+  return category !== null && category !== 'NOT Digital-native';
 };
+
+export function getDigitalNativeCategoryFromCached(cached: string): DigitalNativeCategory | null {
+  const firstLine = cached.split('\n')[0]?.trim() ?? '';
+  if (VALID_CATEGORIES.has(firstLine)) return firstLine as DigitalNativeCategory;
+  return null;
+}

@@ -3,6 +3,7 @@ import type { StageCompany, StageResult } from './types.js';
 
 export type NumberOfUsersData = {
   user_count: string;
+  user_count_numeric: number;
   reasoning: string;
   source_link: string;
   source_date: string;
@@ -34,6 +35,7 @@ export function parseNumberOfUsersResponse(
     const rec = item as Record<string, unknown>;
     const domainRaw = typeof rec['domain'] === 'string' ? rec['domain'] : '';
     const user_count = typeof rec['user_count'] === 'string' ? rec['user_count'] : '';
+    const user_count_numeric = typeof rec['user_count_numeric'] === 'number' ? Math.max(0, Math.round(rec['user_count_numeric'])) : 0;
     const reasoning = typeof rec['reasoning'] === 'string' ? rec['reasoning'] : '';
     const source_link = typeof rec['source_link'] === 'string' ? rec['source_link'] : '';
     const source_date = typeof rec['source_date'] === 'string' ? rec['source_date'] : '';
@@ -41,6 +43,7 @@ export function parseNumberOfUsersResponse(
     if (!domainRaw || !user_count || !VALID_CONFIDENCE.has(confidenceRaw)) continue;
     parsedMap.set(normalizeDomain(domainRaw), {
       user_count,
+      user_count_numeric,
       reasoning,
       source_link,
       source_date,
@@ -67,9 +70,22 @@ export function parseNumberOfUsersResponse(
 
 export function formatNumberOfUsersForAttio(d: NumberOfUsersData): string {
   const parts = [`User count: ${d.user_count}`];
+  parts.push(`User count (numeric): ${d.user_count_numeric}`);
   if (d.reasoning) parts.push(`Reasoning: ${d.reasoning}`);
   if (d.source_link) parts.push(`Source link: ${d.source_link}`);
   if (d.source_date) parts.push(`Source date: ${d.source_date}`);
   parts.push(`Confidence: ${d.confidence}`);
   return parts.join('\n\n');
+}
+
+export function extractUserCountNumericFromCached(cached: string): number | null {
+  const PREFIX = 'User count (numeric): ';
+  for (const line of cached.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(PREFIX)) {
+      const val = Number(trimmed.slice(PREFIX.length).trim());
+      if (Number.isFinite(val) && val >= 0) return Math.round(val);
+    }
+  }
+  return null;
 }
