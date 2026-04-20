@@ -1,8 +1,8 @@
-import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS } from '../config.js';
+import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch } from '../apis/exa.js';
 import { theirstackJobsByTechnology } from '../apis/theirstack.js';
-import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify } from '../rateLimit.js';
+import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi } from '../rateLimit.js';
 import { deriveDomain, normalizeLinkedInUrl } from '../util.js';
 import type { InputRow } from '../types.js';
 import type { StageCompany, StageResult } from '../stages/types.js';
@@ -50,6 +50,8 @@ import { parseNumberOfEngineersResponse, formatNumberOfEngineersForAttio, ENGINE
 import { parseNumberOfSresResponse, formatNumberOfSresForAttio, SRE_TITLES, type NumberOfSresData } from '../stages/numberOfSres.js';
 import { runHarvestLinkedInEmployees, runCareerSiteJobListings, type HarvestEmployeesResponse, type CareerSiteJobListingsResponse } from '../apis/apify.js';
 import { parseHiringResponse, formatEngineerHiringForAttio, formatSreHiringForAttio, type CombinedHiringData } from '../stages/engineerHiring.js';
+import { parseCustomerComplaintsResponse, formatCustomerComplaintsForAttio, type CustomerComplaintsData } from '../stages/customerComplaintsOnX.js';
+import { fetchComplaintTweets } from '../apis/twitterapi.js';
 import { fetchAllRecords, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
@@ -143,6 +145,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     console.log(`[dry] revenue-growth: todo=${rg.length} skipped=${rgDone.length}`);
     const { todo: nou, done: nouDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Number of Users']!);
     console.log(`[dry] number-of-users: todo=${nou.length} skipped=${nouDone.length}`);
+    const { todo: cc, done: ccDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Customer complains on X']!);
+    console.log(`[dry] customer-complaints-on-x: todo=${cc.length} skipped=${ccDone.length}`);
     return;
   }
 
@@ -467,6 +471,35 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
             [stage11EngSlug]: formatEngineerHiringForAttio(r.data),
             [stage11SreSlug]: formatSreHiringForAttio(r.data),
           });
+        }
+      }
+    },
+  });
+
+  // Stage 13 — Customer complains on X (non-gating, data collection only)
+  const stage13Slug = FIELD_SLUGS['Customer complains on X']!;
+  const { todo: stage13Todo, done: stage13Done } = splitByCache(survivorsAfterStage5, attioCache, stage13Slug);
+  console.log(`[customerComplaintsOnX] todo=${stage13Todo.length} skipped=${stage13Done.length}`);
+
+  const companyNameByDomain13 = new Map(stage13Todo.map((c) => [c.domain, c.companyName]));
+
+  await runStage<string[], CustomerComplaintsData>({
+    name: 'customerComplaintsOnX',
+    companies: stage13Todo,
+    batchSize: 1,
+    retry: { tries: TWITTER_API_RETRY_TRIES, baseMs: TWITTER_API_RETRY_BASE_MS },
+    call: (domains) => {
+      const domain = domains[0]!;
+      const name = companyNameByDomain13.get(domain) ?? '';
+      return fetchComplaintTweets(domain, name);
+    },
+    parse: (raw, batch) => parseCustomerComplaintsResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Customer complains on X', batchResults, formatCustomerComplaintsForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage13Slug]: formatCustomerComplaintsForAttio(r.data) });
         }
       }
     },

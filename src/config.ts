@@ -20,6 +20,7 @@ export const KEYS = {
   attio: process.env.ATTIO_API_KEY ?? '',
   attioObjectSlug: process.env.ATTIO_OBJECT_SLUG ?? 'ranked_companies',
   apollo: process.env.APOLLO_API_KEY ?? '',
+  xApi: process.env.X_API_KEY ?? '',
 } as const;
 
 export const CONCURRENCY = Number(process.env.CONCURRENCY ?? 3);
@@ -38,6 +39,9 @@ export const APOLLO_RETRY_BASE_MS = Number(process.env.APOLLO_RETRY_BASE_MS ?? 1
 export const APIFY_CONCURRENCY = Number(process.env.APIFY_CONCURRENCY ?? 10);
 export const APIFY_RETRY_TRIES = Number(process.env.APIFY_RETRY_TRIES ?? 3);
 export const APIFY_RETRY_BASE_MS = Number(process.env.APIFY_RETRY_BASE_MS ?? 2000);
+export const TWITTER_API_QPS = Number(process.env.TWITTER_API_QPS ?? 0.2);
+export const TWITTER_API_RETRY_TRIES = Number(process.env.TWITTER_API_RETRY_TRIES ?? 3);
+export const TWITTER_API_RETRY_BASE_MS = Number(process.env.TWITTER_API_RETRY_BASE_MS ?? 1000);
 
 export const INPUT_COLUMNS = ['Company Name', 'Website', 'Company Linkedin Url'] as const;
 

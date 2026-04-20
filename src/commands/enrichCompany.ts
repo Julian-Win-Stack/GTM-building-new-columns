@@ -26,5 +26,4 @@ export async function enrichCompany(opts: EnrichCompanyOptions): Promise<void> {
 
   console.log(`\n=== [digital-native] ${target} ===`);
   const response = await digitalNativeExaSearch([target]);
-  console.log(JSON.stringify(response, null, 2));
 }
