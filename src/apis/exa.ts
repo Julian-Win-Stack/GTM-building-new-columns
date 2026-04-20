@@ -189,9 +189,11 @@ LinkedIn-specific rules:
 For each input domain, return exactly one entry in companies[] with:
 - domain: the exact domain provided (lowercase, no www.)
 - toolsText: a newline-separated list where each line is formatted EXACTLY as "ToolName: SourceUrl" (one tool per line). ToolName MUST be one of the ALLOWED TOOLS above, spelled exactly as listed (e.g., "New Relic" with a space, "Elastic (ELK)" with parentheses). If no evidence is found, return an empty string "". Do NOT include any other text, headers, numbering, or bullet markers in toolsText — only "Name: URL" lines separated by "\n".
+- IMPORTANT: If a single source (job posting, blog post, LinkedIn profile, etc.) mentions multiple ALLOWED TOOLS, emit one line per tool — each with the same source URL. Do NOT collapse multiple tools from the same source into a single line.
 
-Example toolsText for a company with two tools:
+Example toolsText for a company where one job post mentions both Datadog and Prometheus, and a LinkedIn profile mentions Grafana:
 Datadog: https://jobs.ashbyhq.com/example/abc
+Prometheus: https://jobs.ashbyhq.com/example/abc
 Grafana: https://www.linkedin.com/in/someone
 
 Always include every requested domain in the companies array, even if toolsText is "".`;
@@ -294,7 +296,7 @@ export async function observabilityToolExaSearch(domains: string[]): Promise<Exa
     outputSchema: OBSERVABILITY_TOOL_OBJECT_SCHEMA,
     stream: false,
     systemPrompt: SYSTEM_PROMPT_OBSERVABILITY,
-    type: 'deep-reasoning',
+    type: 'deep',
     contents: {
       text: { maxCharacters: 100000 },
     },
