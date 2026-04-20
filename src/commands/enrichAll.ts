@@ -1,6 +1,6 @@
 import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS, STATUSPAGE_RETRY_TRIES, STATUSPAGE_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
-import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch, aiAdoptionMindsetExaSearch, type ExaSearchResponse } from '../apis/exa.js';
+import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch, aiAdoptionMindsetExaSearch, aiSreMaturityExaSearch, type ExaSearchResponse } from '../apis/exa.js';
 import { collectJobUrls, theirstackJobsByTechnology } from '../apis/theirstack.js';
 import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi } from '../rateLimit.js';
 import { deriveDomain, normalizeLinkedInUrl } from '../util.js';
@@ -65,7 +65,8 @@ import { fetchComplaintTweets } from '../apis/twitterapi.js';
 import { parseRecentIncidentsResponse, formatRecentIncidentsForAttio, type RecentIncidentsData } from '../stages/recentIncidents.js';
 import { fetchRecentIncidents, type FetchOutcome as StatuspageFetchOutcome } from '../apis/statuspage.js';
 import { parseAiAdoptionMindsetResponse, formatAiAdoptionMindsetForAttio, type AiAdoptionMindsetData } from '../stages/aiAdoptionMindset.js';
-import { fetchAllRecords, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
+import { parseAiSreMaturityResponse, formatAiSreMaturityForAttio, type AiSreMaturityData } from '../stages/aiSreMaturity.js';
+import { fetchAllRecords, findCompanyByName, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
 export type EnrichAllOptions = {
@@ -97,17 +98,37 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const linkedinByDomain = new Map<string, string>();
   let skippedBadDomain = 0;
 
+  const noDomainRows: InputRow[] = [];
   for (const row of subset) {
-    const label = (row as InputRow)['Company Name'] || (row as InputRow)['Website'] || '(unknown)';
     const domain = deriveDomain((row as InputRow)['Website']);
     if (!domain) {
-      skippedBadDomain++;
-      console.error(`[fail] ${label}: no parseable domain — skipping`);
+      noDomainRows.push(row as InputRow);
       continue;
     }
     companies.push({ companyName: (row as InputRow)['Company Name'], domain });
     const li = normalizeLinkedInUrl((row as InputRow)['Company Linkedin Url'] ?? '');
     if (li) linkedinByDomain.set(domain, li);
+  }
+
+  // For no-domain rows, look up the domain from Attio by company name (set manually)
+  if (noDomainRows.length > 0) {
+    const lookups = await Promise.all(
+      noDomainRows.map(async (row) => {
+        const name = row['Company Name'] || '(unknown)';
+        const attioDomain = await findCompanyByName(name);
+        return { name, attioDomain };
+      })
+    );
+    for (const { name, attioDomain } of lookups) {
+      if (!attioDomain) {
+        skippedBadDomain++;
+        console.error(`[fail] ${name}: no domain in CSV and no domain in Attio — skipping`);
+      } else {
+        console.log(`[enrich-all] ${name}: no CSV domain, using Attio domain (${attioDomain})`);
+        companies.push({ companyName: name, domain: attioDomain });
+        // intentionally not added to linkedinByDomain — domain came from Attio, skip pre-flight write
+      }
+    }
   }
 
   console.log(
@@ -617,6 +638,35 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, { ...existing, [stage15Slug]: formatAiAdoptionMindsetForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // Stage 16 — AI SRE Maturity (non-gating, data collection only)
+  const stage16Slug = FIELD_SLUGS['AI SRE maturity']!;
+  const { todo: stage16Todo, done: stage16Done } = splitByCache(survivorsAfterStage6, attioCache, stage16Slug);
+  console.log(`[aiSreMaturity] todo=${stage16Todo.length} skipped=${stage16Done.length}`);
+
+  const companyNameByDomain16 = new Map(stage16Todo.map((c) => [c.domain, c.companyName]));
+
+  await runStage<ExaSearchResponse, AiSreMaturityData>({
+    name: 'aiSreMaturity',
+    companies: stage16Todo,
+    batchSize: 1,
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => {
+      const domain = domains[0]!;
+      const name = companyNameByDomain16.get(domain) ?? '';
+      return scheduleExa(() => aiSreMaturityExaSearch(name, domain));
+    },
+    parse: (raw, batch) => parseAiSreMaturityResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('AI SRE maturity', batchResults, formatAiSreMaturityForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage16Slug]: formatAiSreMaturityForAttio(r.data) });
         }
       }
     },

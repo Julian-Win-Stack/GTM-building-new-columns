@@ -33,7 +33,7 @@ src/
   writeRejectionReason.ts — crash-safe Attio writer for the Reason for Rejection column; rate-limited via attioWriteLimit
   apis/
     attio.ts        — Attio REST client: find/create/update/upsertCompanyByDomain
-    exa.ts          — Exa search calls; ExaSearchResponse type; most stage functions use structured JSON outputSchema + type:'deep-reasoning'; aiAdoptionMindsetExaSearch uses text outputSchema (outputSchema: { type: 'text' })
+    exa.ts          — Exa search calls; ExaSearchResponse type; most stage functions use structured JSON outputSchema + type:'deep-reasoning'; aiAdoptionMindsetExaSearch and aiSreMaturityExaSearch use text outputSchema (outputSchema: { type: 'text' })
     apify.ts        — Apify actor client: runHarvestLinkedInEmployees (harvestapi/linkedin-company-employees, run-sync via SDK); runCareerSiteJobListings (fantastic-jobs/career-site-job-listing-feed, run-sync via SDK)
     openai.ts       — Azure OpenAI wrapper
     theirstack.ts   — TheirStack API
@@ -63,6 +63,7 @@ src/
     customerComplaintsOnX.ts — Stage 13: twitterapi.io complaint tweets + Azure OpenAI classifier (4 buckets), no gate, Attio formatter (4-line count string)
     recentIncidents.ts  — Stage 14: Statuspage v2 parser (drops dates, keeps impact + component names), no gate, Attio formatter (counts line + top components + per-incident list, or "Private status page" / "No status page found" / "0 incidents (last 90 days)")
     aiAdoptionMindset.ts — Stage 15: text parser (passes Exa text output through verbatim), no gate, Attio formatter (verbatim Classification/Confidence/Evidence/Reasoning block)
+    aiSreMaturity.ts    — Stage 16: text parser (passes Exa text output through verbatim), no gate, Attio formatter (verbatim Classification/Confidence/Sales signal/Evidence/Reasoning block)
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
@@ -127,7 +128,7 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 13 | Customer complains on X | twitterapi.io + Azure OpenAI | no gate — data collection only |
 | 14 | Recent incidents ( Official ) | Statuspage v2 | no gate — data collection only |
 | 15 | AI adoption mindset | Exa | no gate — data collection only |
-| 16 | remaining columns | various | no gate — data collection only |
+| 16 | AI SRE maturity | Exa | no gate — data collection only |
 
 Stages 1–6 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing. Immediately after each gate, rejected companies receive a `Reason for Rejection` value written to Attio (crash-safe, via `writeRejectionReasons` in `src/writeRejectionReason.ts`). The reason format is `"<Stage name>: <specific reason>"` (e.g. `"Cloud Tool: uses Azure (not AWS/GCP)"`). Errored companies (fetch/parse failure) are not written — they will be retried on the next run.
 
@@ -307,6 +308,19 @@ Reasoning:
 ```
 Stage 15 is per-company (batchSize: 1). The query, `additionalQueries`, and `systemPrompt` are all company-specific (domain + companyName substituted at runtime). No link validation.
 
+**AI SRE maturity** — verbatim text from Exa (no reformatting). Exa's `deep-reasoning` model writes this directly:
+```
+Classification: <building in-house | working with vendors | ideating | not ready | unverified>
+Confidence: <High | Medium | Low>
+Sales signal: <Strong buy | Competitor risk | High potential | Not ready | Unknown>
+Evidence:
+- "<paraphrase of statement or observation>" (source URL)
+- "<paraphrase of statement or observation>" (source URL)
+Reasoning:
+- 2 to 5 bullet points tied directly to evidence
+```
+Stage 16 is per-company (batchSize: 1). The query, `additionalQueries`, and `systemPrompt` are all company-specific (domain + companyName substituted at runtime). No link validation. Operates on `survivorsAfterStage6` independently of Stage 15.
+
 **LinkedIn Page** — written once at pipeline start (pre-flight, before Stage 1) for companies that have no existing Attio record. Value comes directly from the `Company Linkedin Url` column in the input CSV. Not written for companies already in Attio.
 
 Stages 7–15 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
@@ -319,7 +333,7 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 ### API mapping
 - **Local match (no API)**: Competitor Tooling
 - **Exa (batch of 2)**: Digital Native, Number of Users, Observability Tool, Cloud Tool, Funding Growth, Revenue Growth
-- **Exa (batch of 1, per-company)**: AI adoption mindset — uses `outputSchema: { type: 'text' }` + `additionalQueries` + `contents.highlights`; query and systemPrompt are company-specific
+- **Exa (batch of 1, per-company)**: AI adoption mindset, AI SRE maturity — uses `outputSchema: { type: 'text' }` + `additionalQueries` + `contents.highlights`; query and systemPrompt are company-specific
 - **TheirStack**: Communication Tool
 - **Apollo**: Number of Engineers
 - **Apify (harvestapi/linkedin-company-employees)**: Number of SREs

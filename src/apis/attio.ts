@@ -86,6 +86,16 @@ export async function fetchAllRecords(
   return map;
 }
 
+export async function findCompanyByName(name: string): Promise<string | null> {
+  const res = await http.post(`/objects/${KEYS.attioObjectSlug}/records/query`, {
+    filter: { company_name: { $eq: name } },
+    limit: 1,
+  });
+  const rec = res.data?.data?.[0] as RawAttioRecord | undefined;
+  if (!rec) return null;
+  return extractDomain(rec) || null;
+}
+
 export async function findCompanyByDomain(domain: string): Promise<AttioRecord | null> {
   const res = await http.post(`/objects/${KEYS.attioObjectSlug}/records/query`, {
     filter: { domain: { $eq: domain } },

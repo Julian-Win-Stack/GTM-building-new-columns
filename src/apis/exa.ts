@@ -601,3 +601,76 @@ export async function aiAdoptionMindsetExaSearch(
     },
   });
 }
+
+const AI_SRE_MATURITY_SYSTEM_PROMPT = (companyName: string) =>
+  `You are a research analyst evaluating a company's AI SRE maturity for a B2B sales context. Your goal is to determine whether this company is a likely buyer of an AI SRE product, is already building their own, or is working with a competitor.
+
+Target company: ${companyName}
+
+You may use evidence from any of the following public sources:
+- LinkedIn posts or articles from engineers, SREs, or leadership
+- Engineering blogs or technical case studies
+- Job postings related to SRE, incident response, or reliability engineering
+- YouTube videos, conference talks, or live streams
+- Interviews with engineering or operations leadership
+- Vendor case studies or customer references naming the company
+- GitHub repositories or open source projects related to incident automation
+
+Classify the company into exactly one of the following:
+
+building in-house = the company is actively building its own internal AI system for incident response, on-call automation, triage, or RCA.
+working with vendors = the company is a confirmed customer or named user of an AI SRE or incident management vendor such as Resolve.ai, Incident.io, Rootly, FireHydrant, or similar.
+ideating = the company is exploring, discussing, piloting, or experimenting with AI for SRE or incident response but has not confirmed a build or vendor adoption.
+not ready = the company's SRE and incident management practices are too immature, manual, or underdeveloped for credible AI SRE adoption in the near term.
+unverified = not enough public evidence to classify confidently.
+
+Sales interpretation guidance:
+- building in-house = low likelihood to buy, already investing internally
+- working with vendors = already bought from a competitor, re-engagement opportunity
+- ideating = high likelihood to buy, actively thinking about the problem
+- not ready = not a near-term buyer, foundational gaps need to be addressed first
+- unverified = requires outbound discovery to qualify
+
+Use hiring signals as strong evidence. A company hiring SRE engineers with AI or automation responsibilities, or creating dedicated incident automation roles, is a strong signal of either building in-house or high readiness to adopt.
+
+Output format:
+Classification: <building in-house | working with vendors | ideating | not ready | unverified>
+Confidence: <High | Medium | Low>
+Sales signal: <Strong buy | Competitor risk | High potential | Not ready | Unknown>
+Evidence:
+- "<paraphrase of statement or observation>" (source URL)
+- "<paraphrase of statement or observation>" (source URL)
+Reasoning:
+- 2 to 5 bullet points tied directly to evidence
+- Prioritize actions and hiring patterns over rhetoric
+- Do not make assumptions
+
+Rules:
+- Only use explicit, verifiable evidence from the search results
+- Do not infer vendor usage from logos, integrations, or vague partnership mentions
+- Do not infer in-house development from general AI enthusiasm alone
+- Do not classify based on company size or valuation alone
+- If signals conflict, choose the strongest explicitly supported category and lower confidence
+- If evidence is insufficient, classify as unverified`;
+
+export async function aiSreMaturityExaSearch(
+  companyName: string,
+  domain: string
+): Promise<ExaSearchResponse> {
+  const query = `The company - ${domain} engineers and SRE teams talking about how they handle incident response, on-call automation, and whether they are building or buying AI tools for reliability and operations`;
+  const additionalQuery = `${domain} SRE on-call incident response automation AI triage job postings`;
+
+  return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
+    additionalQueries: [additionalQuery],
+    numResults: 10,
+    outputSchema: { type: 'text' },
+    stream: false,
+    systemPrompt: AI_SRE_MATURITY_SYSTEM_PROMPT(companyName),
+    type: 'deep-reasoning',
+    contents: {
+      highlights: {
+        query: 'incident response automation on-call triage root cause analysis AI SRE reliability engineering',
+      },
+    },
+  });
+}

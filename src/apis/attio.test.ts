@@ -14,7 +14,7 @@ vi.mock('axios', () => ({
   },
 }));
 
-const { findCompanyByDomain, createCompany, updateCompany, upsertCompanyByDomain, fetchAllRecords } =
+const { findCompanyByDomain, findCompanyByName, createCompany, updateCompany, upsertCompanyByDomain, fetchAllRecords } =
   await import('./attio.js');
 
 beforeEach(() => {
@@ -65,6 +65,32 @@ describe('findCompanyByDomain', () => {
     });
     const out = await findCompanyByDomain('acme.com');
     expect(out?.values).toEqual({});
+  });
+});
+
+describe('findCompanyByName', () => {
+  it('queries by company_name and returns the domain on match', async () => {
+    httpMock.post.mockResolvedValue({
+      data: { data: [{ id: { record_id: 'rec_1' }, values: { domain: [{ domain_name: 'acme.com' }] } }] },
+    });
+    const domain = await findCompanyByName('Acme');
+    expect(httpMock.post).toHaveBeenCalledWith(
+      expect.stringMatching(/\/records\/query$/),
+      { filter: { company_name: { $eq: 'Acme' } }, limit: 1 }
+    );
+    expect(domain).toBe('acme.com');
+  });
+
+  it('returns null when no records match', async () => {
+    httpMock.post.mockResolvedValue({ data: { data: [] } });
+    expect(await findCompanyByName('Unknown Co')).toBeNull();
+  });
+
+  it('returns null when the matched record has no domain', async () => {
+    httpMock.post.mockResolvedValue({
+      data: { data: [{ id: { record_id: 'rec_1' }, values: { company_name: [{ value: 'Acme' }] } }] },
+    });
+    expect(await findCompanyByName('Acme')).toBeNull();
   });
 });
 
