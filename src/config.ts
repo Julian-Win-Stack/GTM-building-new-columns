@@ -42,6 +42,9 @@ export const APIFY_RETRY_BASE_MS = Number(process.env.APIFY_RETRY_BASE_MS ?? 200
 export const TWITTER_API_QPS = Number(process.env.TWITTER_API_QPS ?? 0.2);
 export const TWITTER_API_RETRY_TRIES = Number(process.env.TWITTER_API_RETRY_TRIES ?? 3);
 export const TWITTER_API_RETRY_BASE_MS = Number(process.env.TWITTER_API_RETRY_BASE_MS ?? 1000);
+export const STATUSPAGE_CONCURRENCY = Number(process.env.STATUSPAGE_CONCURRENCY ?? 20);
+export const STATUSPAGE_RETRY_TRIES = Number(process.env.STATUSPAGE_RETRY_TRIES ?? 3);
+export const STATUSPAGE_RETRY_BASE_MS = Number(process.env.STATUSPAGE_RETRY_BASE_MS ?? 1000);
 
 export const INPUT_COLUMNS = ['Company Name', 'Website', 'Company Linkedin Url'] as const;
 

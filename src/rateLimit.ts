@@ -1,6 +1,6 @@
 import Bottleneck from 'bottleneck';
 import pLimit from 'p-limit';
-import { EXA_QPS, THEIRSTACK_QPS, APOLLO_QPS, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, APIFY_CONCURRENCY, TWITTER_API_QPS } from './config.js';
+import { EXA_QPS, THEIRSTACK_QPS, APOLLO_QPS, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, APIFY_CONCURRENCY, TWITTER_API_QPS, STATUSPAGE_CONCURRENCY } from './config.js';
 
 export const exaLimiter = new Bottleneck({
   reservoir: EXA_QPS,
@@ -57,4 +57,9 @@ export function scheduleTwitterApi<T>(fn: () => Promise<T>): Promise<T> {
       lastTwitterCallAt = Date.now();
     }
   });
+}
+
+export const statuspageLimit = pLimit(STATUSPAGE_CONCURRENCY);
+export function scheduleStatuspage<T>(fn: () => Promise<T>): Promise<T> {
+  return statuspageLimit(fn);
 }

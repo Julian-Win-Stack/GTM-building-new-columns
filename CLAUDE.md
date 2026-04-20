@@ -39,7 +39,7 @@ src/
     theirstack.ts   — TheirStack API
     apollo.ts       — Apollo REST API client: apolloMixedPeopleApiSearch (POST /mixed_people/api_search, reads total_entries)
     twitterapi.ts   — twitterapi.io client: twitterAdvancedSearch (GET /twitter/tweet/advanced_search); fetchComplaintTweets (paginated, caps at 50 tweets, since_time=90 days ago)
-    statuspage.ts   — Statuspage v2 client (no auth): slugCandidates (strips legal suffixes, returns compact + dashed), fetchRecentIncidents (probes https://status.{domain} then https://{slug}.statuspage.io, paginates 90-day window, daily disk cache)
+    statuspage.ts   — Statuspage v2 client (no auth): slugCandidates (strips legal suffixes, returns compact + dashed), fetchRecentIncidents (probes https://status.{domain} then https://{slug}.statuspage.io, paginates 90-day window)
   commands/
     enrichAll.ts    — stage-wise bulk enrichment: Stage 1 → write → filter → Stage 2 → …
     enrichCompany.ts — enrich one company by domain (row-wise, uses pipeline.ts)
@@ -291,7 +291,7 @@ Probe order per company (first non-`try-next` outcome wins):
 1. `https://status.{domain}/api/v2/incidents.json?limit=100&page=1`
 2. `https://{slug}.statuspage.io/...` for each candidate slug from `slugCandidates(companyName)` — strips trailing legal suffixes (Inc./LLC/Ltd./Corp./Corporation/Co./GmbH/etc.) then produces compact (`datadog`) and dashed (`new-relic`) variants, deduped.
 
-Pagination: `?limit=100&page=N`, stops when (a) oldest `created_at` on the page is older than 90 days, (b) a page returns fewer than 100 items, or (c) the 10-page safety cap is reached. The final set is filtered to the 90-day window before being returned. Whole probe sequence per company is cached on disk under `cache/statuspage/` with a `${domain}:${YYYYMMDD}` key (daily refresh).
+Pagination: `?limit=100&page=N`, stops when (a) oldest `created_at` on the page is older than 90 days, (b) a page returns fewer than 100 items, or (c) the 10-page safety cap is reached. The final set is filtered to the 90-day window before being returned.
 
 **LinkedIn Page** — written once at pipeline start (pre-flight, before Stage 1) for companies that have no existing Attio record. Value comes directly from the `Company Linkedin Url` column in the input CSV. Not written for companies already in Attio.
 
