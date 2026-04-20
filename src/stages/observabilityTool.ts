@@ -154,8 +154,8 @@ export async function parseObservabilityToolResponse(
   raw: ExaSearchResponse,
   companies: StageCompany[]
 ): Promise<StageResult<ObservabilityToolData>[]> {
-  console.log(`[observabilityTool] raw Exa response for [${companies.map((c) => c.domain).join(', ')}]:`);
-  console.log(JSON.stringify(raw, null, 2));
+  console.log('[observabilityTool] raw Exa output.content:', JSON.stringify(raw.output?.content, null, 2));
+  console.log('[observabilityTool] raw Exa results[] URLs + hasText:', (raw.results ?? []).map(r => ({ url: r.url, hasText: typeof r.text === 'string' && r.text.length > 0, textLen: r.text?.length ?? 0 })));
 
   const parsedMap = new Map<string, ObservabilityToolData>();
   const payload = extractParsedObject(raw);
