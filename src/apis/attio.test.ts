@@ -227,6 +227,29 @@ describe('fetchAllRecords', () => {
     const map = await fetchAllRecords(['acme.com'], httpMock);
     expect(map.size).toBe(0);
   });
+
+  it('returns all records when called with no domain filter', async () => {
+    httpMock.post.mockResolvedValue({
+      data: { data: [makeRecord('acme.com'), makeRecord('other.com'), makeRecord('third.com')] },
+    });
+
+    const map = await fetchAllRecords(undefined, httpMock);
+
+    expect(map.size).toBe(3);
+    expect(map.has('acme.com')).toBe(true);
+    expect(map.has('other.com')).toBe(true);
+    expect(map.has('third.com')).toBe(true);
+  });
+
+  it('returns all records when called with null filter', async () => {
+    httpMock.post.mockResolvedValue({
+      data: { data: [makeRecord('acme.com'), makeRecord('other.com')] },
+    });
+
+    const map = await fetchAllRecords(null, httpMock);
+
+    expect(map.size).toBe(2);
+  });
 });
 
 describe('upsertCompanyByDomain', () => {

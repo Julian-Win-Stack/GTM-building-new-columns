@@ -8,12 +8,14 @@ const http = axios.create({
   timeout: 30_000,
 });
 
-export type TwitterTweet = { text: string };
+export type TwitterTweet = { text: string; id?: string; url?: string };
 export type TwitterSearchResponse = {
   tweets: TwitterTweet[];
   has_next_page: boolean;
   next_cursor: string;
 };
+
+export type TweetItem = { text: string; url: string };
 
 function shortCursor(c: string): string {
   if (!c) return '<empty>';
@@ -30,7 +32,13 @@ export async function twitterAdvancedSearch(
   return data;
 }
 
-export async function fetchComplaintTweets(domain: string, companyName: string): Promise<string[]> {
+function tweetUrl(tweet: TwitterTweet): string {
+  if (tweet.url) return tweet.url;
+  if (tweet.id) return `https://x.com/i/status/${tweet.id}`;
+  return '';
+}
+
+export async function fetchComplaintTweets(domain: string, companyName: string): Promise<TweetItem[]> {
   const handle = domain.split('.')[0] ?? domain;
   const sinceTime = Math.floor((Date.now() - 90 * 86400 * 1000) / 1000);
   const escapedName = companyName.replace(/"/g, '\\"');
@@ -41,7 +49,7 @@ export async function fetchComplaintTweets(domain: string, companyName: string):
 
   console.log(`[twitterapi] ${domain} query (len=${query.length}): ${query}`);
 
-  const accumulated: string[] = [];
+  const accumulated: TweetItem[] = [];
   let cursor = '';
   let page = 0;
 
@@ -50,7 +58,7 @@ export async function fetchComplaintTweets(domain: string, companyName: string):
     const cursorIn = cursor;
     try {
       const res = await scheduleTwitterApi(() => twitterAdvancedSearch(query, cursor));
-      for (const tweet of res.tweets) accumulated.push(tweet.text);
+      for (const tweet of res.tweets) accumulated.push({ text: tweet.text, url: tweetUrl(tweet) });
       console.log(
         `[twitterapi] ${domain} page ${page}: tweets=${res.tweets.length} total=${accumulated.length} has_next=${res.has_next_page} cursor_in=${shortCursor(cursorIn)} cursor_out=${shortCursor(res.next_cursor)}`
       );
@@ -82,7 +90,7 @@ export async function fetchComplaintTweets(domain: string, companyName: string):
   const sampleCount = Math.min(final.length, 10);
   for (let i = 0; i < sampleCount; i++) {
     const t = final[i]!;
-    const preview = t.length > 200 ? `${t.slice(0, 200)}…` : t;
+    const preview = t.text.length > 200 ? `${t.text.slice(0, 200)}…` : t.text;
     console.log(`[twitterapi] ${domain} tweet[${i + 1}]: ${preview.replace(/\n/g, ' ')}`);
   }
   if (final.length > sampleCount) {

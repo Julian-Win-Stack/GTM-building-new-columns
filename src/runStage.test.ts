@@ -242,6 +242,23 @@ describe('runStage', () => {
     expect(out).toHaveLength(4);
   });
 
+  it('retries when parse (not call) throws a 429', async () => {
+    const companies = makeCompanies(2);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const call = vi.fn().mockResolvedValue('raw');
+    const parse = vi
+      .fn()
+      .mockRejectedValueOnce(makeAxiosError(429, '1'))
+      .mockImplementation((_raw: string, batch: StageCompany[]) =>
+        batch.map<StageResult<string>>((c) => ({ company: c, data: 'ok' }))
+      );
+
+    const out = await runStage({ name: 's', companies, batchSize: 2, call, parse, retry: { tries: 3, baseMs: 1 } });
+    expect(parse).toHaveBeenCalledTimes(2);
+    expect(out[0]!.error).toBeUndefined();
+    expect(out[0]!.data).toBe('ok');
+  });
+
   it('swallows afterBatch throws so one bad write does not abort the stage', async () => {
     const companies = makeCompanies(4);
     const call = vi.fn().mockResolvedValue('raw');

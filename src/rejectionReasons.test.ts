@@ -52,12 +52,12 @@ describe('digitalNativeCacheRejectionReason', () => {
 });
 
 describe('numberOfUsersRejectionReason', () => {
-  it('includes the formatted count', () => {
-    expect(numberOfUsersRejectionReason(45000)).toBe('Number of Users: B2B company with 45,000 users (requires ≥100,000)');
+  it('includes the bucket in the message', () => {
+    expect(numberOfUsersRejectionReason('10K–100K')).toBe('Number of Users: B2B company in "10K–100K" bucket (requires 100K+)');
   });
 
-  it('formats large numbers with commas', () => {
-    expect(numberOfUsersRejectionReason(1500)).toBe('Number of Users: B2B company with 1,500 users (requires ≥100,000)');
+  it('works for small buckets', () => {
+    expect(numberOfUsersRejectionReason('1K–10K')).toBe('Number of Users: B2B company in "1K–10K" bucket (requires 100K+)');
   });
 });
 

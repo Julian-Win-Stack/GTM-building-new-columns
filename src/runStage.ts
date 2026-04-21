@@ -41,7 +41,7 @@ async function runOneBatch<TRaw, TData>(
   for (let attempt = 0; attempt < retry.tries; attempt++) {
     try {
       const raw = await call(domains);
-      return parse(raw, batch);
+      return await parse(raw, batch);
     } catch (err) {
       lastErr = err;
       const msg = err instanceof Error ? err.message : String(err);

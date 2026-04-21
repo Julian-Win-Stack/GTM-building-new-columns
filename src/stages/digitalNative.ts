@@ -12,6 +12,7 @@ export type DigitalNativeData = {
   category: DigitalNativeCategory;
   confidence: string;
   reason: string;
+  source_links: string[];
 };
 
 const VALID_CATEGORIES: ReadonlySet<string> = new Set([
@@ -47,12 +48,16 @@ export function parseDigitalNativeResponse(
     const category = typeof rec['category'] === 'string' ? rec['category'] : '';
     const confidence = typeof rec['confidence'] === 'string' ? rec['confidence'] : '';
     const reason = typeof rec['reason'] === 'string' ? rec['reason'] : '';
+    const source_links = Array.isArray(rec['source_links'])
+      ? (rec['source_links'] as unknown[]).filter((u): u is string => typeof u === 'string')
+      : [];
     if (!domainRaw || !category || !confidence || !reason) continue;
     if (!VALID_CATEGORIES.has(category)) continue;
     parsedMap.set(normalizeDomain(domainRaw), {
       category: category as DigitalNativeCategory,
       confidence,
       reason,
+      source_links,
     });
   }
 
@@ -77,7 +82,11 @@ export const digitalNativeGate: GateRule<DigitalNativeData> = (d) =>
   d.category !== 'NOT Digital-native';
 
 export function formatDigitalNativeForAttio(d: DigitalNativeData): string {
-  return `${d.category}\n\nConfidence: ${d.confidence}\n\nReasoning: ${d.reason}`;
+  const parts = [`${d.category}`, `Confidence: ${d.confidence}`, `Reasoning: ${d.reason}`];
+  if (d.source_links.length > 0) {
+    parts.push(`Sources:\n${d.source_links.join('\n')}`);
+  }
+  return parts.join('\n\n');
 }
 
 export const digitalNativeCacheGate = (cached: string): boolean => {

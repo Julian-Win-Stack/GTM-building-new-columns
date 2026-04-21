@@ -20,9 +20,8 @@ export function digitalNativeCacheRejectionReason(_cached: string): string {
   return 'Digital Native: not a digital-native company';
 }
 
-export function numberOfUsersRejectionReason(numeric: number): string {
-  const formatted = numeric.toLocaleString('en-US');
-  return `Number of Users: B2B company with ${formatted} users (requires ≥100,000)`;
+export function numberOfUsersRejectionReason(bucket: string): string {
+  return `Number of Users: B2B company in "${bucket}" bucket (requires 100K+)`;
 }
 
 export function observabilityToolRejectionReason(d: ObservabilityToolData): string {
