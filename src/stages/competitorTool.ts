@@ -12,10 +12,11 @@ export const COMPETITOR_TOOLS: Record<string, readonly string[]> = {
     'Taplytics', 'Ritual',
   ],
   'Incident.io': [
-    'Netflix', 'Etsy', 'Skyscanner', 'Vanta', 'Intercom', 'WorkOS', 'Miro',
-    'HashiCorp', 'StubHub', 'Linear', 'Render', 'Loom', 'GoCardless', 'Ramp',
-    'Vercel', 'dbt Labs', 'Pipe', 'Duffel', 'Primer', 'Netlify', 'TravelPerk',
-    'monday.com',
+    'Intercom', 'Netflix', 'Etsy', 'Flagstone', 'Torq', 'Rho', 'Favor',
+    'Buffer', 'AudioStack', 'Motorway', 'Picnic', 'Skyscanner', 'Thrive',
+    'SumUp', 'Clari', 'Vanta', 'Trainline', 'Pleo', 'Isometric', 'TrueLayer',
+    'Bold Commerce', 'Bud', 'WorkOS', 'RD Station', 'Giant Swarm', 'Future',
+    'ComplyAdvantage', 'Accurx',
   ],
   'Traversal': [
     'DigitalOcean', 'Cloudways', 'American Express', 'Pepsi',
