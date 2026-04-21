@@ -103,6 +103,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     domain: string;
     linkedinUrl: string;
     description: string;
+    website: string;
   };
 
   const csvIdentities: CsvIdentity[] = [];
@@ -113,7 +114,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const pendingLinkedInOnly: CsvIdentity[] = [];
   for (const raw of subset) {
     const row = raw as InputRow;
-    const domain = deriveDomain(row['Website']);
+    const website = row['Website'] ?? '';
+    const domain = deriveDomain(website);
     const linkedinUrl = normalizeLinkedInUrl(row['Company Linkedin Url'] ?? '');
     const name = row['Company Name'] ?? '';
     const description = row['Short Description'] ?? '';
@@ -124,7 +126,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       continue;
     }
 
-    const identity: CsvIdentity = { name, domain, linkedinUrl, description };
+    const identity: CsvIdentity = { name, domain, linkedinUrl, description, website };
     if (domain) {
       csvIdentities.push(identity);
       companies.push({ companyName: name, domain });
@@ -143,6 +145,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const linkedinSlug = FIELD_SLUGS['LinkedIn Page']!;
   const domainSlug = FIELD_SLUGS['Domain']!;
   const descriptionSlug = FIELD_SLUGS['Description']!;
+  const websiteSlug = FIELD_SLUGS['Website']!;
 
   const byLinkedIn = new Map<string, { domain: string; values: Record<string, string> }>();
   for (const [domain, values] of attioCache) {
@@ -196,6 +199,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
         if (id.domain && !existingValues[domainSlug]) toWrite['Domain'] = id.domain;
         if (id.linkedinUrl && !existingValues[linkedinSlug]) toWrite['LinkedIn Page'] = id.linkedinUrl;
         if (id.description && !existingValues[descriptionSlug]) toWrite['Description'] = id.description;
+        if (id.website && !existingValues[websiteSlug]) toWrite['Website'] = id.website;
         return { id, toWrite };
       })
       .filter(({ toWrite }) => Object.keys(toWrite).length > 0);
