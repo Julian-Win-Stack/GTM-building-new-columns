@@ -1,6 +1,6 @@
 import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS, STATUSPAGE_RETRY_TRIES, STATUSPAGE_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
-import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch, aiAdoptionMindsetExaSearch, aiSreMaturityExaSearch, type ExaSearchResponse } from '../apis/exa.js';
+import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch, aiAdoptionMindsetExaSearch, aiSreMaturityExaSearch, industryExaSearch, type ExaSearchResponse } from '../apis/exa.js';
 import { collectJobUrls, theirstackJobsByTechnology } from '../apis/theirstack.js';
 import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi } from '../rateLimit.js';
 import { deriveDomain, normalizeLinkedInUrl } from '../util.js';
@@ -54,18 +54,19 @@ import {
 } from '../stages/cloudTool.js';
 import { parseFundingGrowthResponse, formatFundingGrowthForAttio } from '../stages/fundingGrowth.js';
 import { parseRevenueGrowthResponse, formatRevenueGrowthForAttio } from '../stages/revenueGrowth.js';
-import { parseNumberOfUsersResponse, formatNumberOfUsersForAttio, extractUserCountNumericFromCached } from '../stages/numberOfUsers.js';
+import { parseNumberOfUsersResponse, formatNumberOfUsersForAttio, extractUserCountBucketFromCached, type UserCountBucket } from '../stages/numberOfUsers.js';
 import { apolloMixedPeopleApiSearch } from '../apis/apollo.js';
 import { parseNumberOfEngineersResponse, formatNumberOfEngineersForAttio, ENGINEER_TITLES } from '../stages/numberOfEngineers.js';
 import { parseNumberOfSresResponse, formatNumberOfSresForAttio, SRE_TITLES, type NumberOfSresData } from '../stages/numberOfSres.js';
 import { runHarvestLinkedInEmployees, runCareerSiteJobListings, type HarvestEmployeesResponse, type CareerSiteJobListingsResponse } from '../apis/apify.js';
 import { parseHiringResponse, formatEngineerHiringForAttio, formatSreHiringForAttio, type CombinedHiringData } from '../stages/engineerHiring.js';
 import { parseCustomerComplaintsResponse, formatCustomerComplaintsForAttio, type CustomerComplaintsData } from '../stages/customerComplaintsOnX.js';
-import { fetchComplaintTweets } from '../apis/twitterapi.js';
+import { fetchComplaintTweets, type TweetItem } from '../apis/twitterapi.js';
 import { parseRecentIncidentsResponse, formatRecentIncidentsForAttio, type RecentIncidentsData } from '../stages/recentIncidents.js';
 import { fetchRecentIncidents, type FetchOutcome as StatuspageFetchOutcome } from '../apis/statuspage.js';
 import { parseAiAdoptionMindsetResponse, formatAiAdoptionMindsetForAttio, type AiAdoptionMindsetData } from '../stages/aiAdoptionMindset.js';
 import { parseAiSreMaturityResponse, formatAiSreMaturityForAttio, type AiSreMaturityData } from '../stages/aiSreMaturity.js';
+import { parseIndustryResponse, formatIndustryForAttio, type IndustryData } from '../stages/industry.js';
 import { fetchAllRecords, findCompanyByName, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
@@ -132,12 +133,34 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   }
 
   console.log(
-    `[enrich-all] csv=${csvPath} rows=${subset.length} companies=${companies.length} badDomains=${skippedBadDomain} dryRun=${!!opts.dryRun}`
+    `[enrich-all] csv=${csvPath} rows=${subset.length} csvCompanies=${companies.length} badDomains=${skippedBadDomain} dryRun=${!!opts.dryRun}`
   );
 
   console.log(`[enrich-all] pre-fetching Attio records…`);
-  const attioCache = await fetchAllRecords(companies.map((c) => c.domain));
+  const attioCache = await fetchAllRecords();
   console.log(`[enrich-all] attio cache loaded (${attioCache.size} records found)`);
+
+  const csvDomainSet = new Set(companies.map((c) => c.domain));
+  const reasonSlug = FIELD_SLUGS['Reason for Rejection']!;
+  const nameSlug = FIELD_SLUGS['Company Name']!;
+  const linkedinSlug = FIELD_SLUGS['LinkedIn Page']!;
+  let attioOnlyIncluded = 0;
+  let attioOnlyRejected = 0;
+  for (const [domain, values] of attioCache) {
+    if (csvDomainSet.has(domain)) continue;
+    if (values[reasonSlug]) {
+      attioOnlyRejected++;
+      continue;
+    }
+    const name = values[nameSlug] || domain;
+    companies.push({ companyName: name, domain });
+    attioOnlyIncluded++;
+    const li = values[linkedinSlug];
+    if (li && !linkedinByDomain.has(domain)) linkedinByDomain.set(domain, li);
+  }
+  console.log(
+    `[enrich-all] total companies=${companies.length} (attio-only-included=${attioOnlyIncluded} attio-only-rejected-skipped=${attioOnlyRejected})`
+  );
 
   // Write LinkedIn URL for companies that don't yet have an Attio record
   const newCompanies = companies.filter((c) => !attioCache.has(c.domain) && linkedinByDomain.has(c.domain));
@@ -183,6 +206,12 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     console.log(`[dry] customer-complaints-on-x: todo=${cc.length} skipped=${ccDone.length}`);
     const { todo: ri, done: riDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Recent incidents ( Official )']!);
     console.log(`[dry] recent-incidents-official: todo=${ri.length} skipped=${riDone.length}`);
+    const { todo: ind, done: indDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Industry']!);
+    console.log(`[dry] industry: todo=${ind.length} skipped=${indDone.length}`);
+    for (let i = 0; i < ind.length; i += 2) {
+      const batch = ind.slice(i, i + 2);
+      console.log(`[dry]   batch: ${batch.map((c) => c.domain).join(', ')}`);
+    }
     return;
   }
 
@@ -262,12 +291,12 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     },
   });
 
-  function userCountPassesGate(domain: string, numeric: number | null, hadError: boolean): boolean {
+  function userCountPassesGate(domain: string, bucket: UserCountBucket | null, hadError: boolean): boolean {
     const dnCategory = getDigitalNativeCategoryFromCached(attioCache.get(domain)?.[dnSlug] ?? '');
     if (dnCategory !== 'Digital-native B2B') return true;
     if (hadError) return true;
-    if (numeric === null || numeric === 0) return true;
-    return numeric >= 100000;
+    if (bucket === null || bucket === 'unknown') return true;
+    return bucket === '100K+';
   }
 
   const stage3TodoSurvivors: StageCompany[] = [];
@@ -277,20 +306,20 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       stage3TodoSurvivors.push(r.company);
       continue;
     }
-    if (userCountPassesGate(r.company.domain, r.data.user_count_numeric, false)) {
+    if (userCountPassesGate(r.company.domain, r.data.user_count_bucket, false)) {
       stage3TodoSurvivors.push(r.company);
     } else {
-      stage3TodoRejected.push({ company: r.company, reason: numberOfUsersRejectionReason(r.data.user_count_numeric) });
+      stage3TodoRejected.push({ company: r.company, reason: numberOfUsersRejectionReason(r.data.user_count_bucket) });
     }
   }
   const stage3DoneSurvivors: StageCompany[] = [];
   const stage3DoneRejected: Array<{ company: StageCompany; reason: string }> = [];
   for (const c of stage3Done) {
-    const numeric = extractUserCountNumericFromCached(attioCache.get(c.domain)?.[stage3Slug] ?? '');
-    if (userCountPassesGate(c.domain, numeric, false)) {
+    const bucket = extractUserCountBucketFromCached(attioCache.get(c.domain)?.[stage3Slug] ?? '');
+    if (userCountPassesGate(c.domain, bucket, false)) {
       stage3DoneSurvivors.push(c);
     } else {
-      stage3DoneRejected.push({ company: c, reason: numberOfUsersRejectionReason(numeric ?? 0) });
+      stage3DoneRejected.push({ company: c, reason: numberOfUsersRejectionReason(bucket ?? 'unknown') });
     }
   }
   const stage3TotalRejected = stage3TodoRejected.length + stage3DoneRejected.length;
@@ -563,7 +592,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
 
   const companyNameByDomain13 = new Map(stage13Todo.map((c) => [c.domain, c.companyName]));
 
-  await runStage<string[], CustomerComplaintsData>({
+  await runStage<TweetItem[], CustomerComplaintsData>({
     name: 'customerComplaintsOnX',
     companies: stage13Todo,
     batchSize: 1,
@@ -667,6 +696,29 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
         if (r.error === undefined) {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, { ...existing, [stage16Slug]: formatAiSreMaturityForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // Stage 17 — Industry (batch-of-2, non-gating, data collection only)
+  const stage17Slug = FIELD_SLUGS['Industry']!;
+  const { todo: stage17Todo, done: stage17Done } = splitByCache(survivorsAfterStage6, attioCache, stage17Slug);
+  console.log(`[industry] todo=${stage17Todo.length} skipped=${stage17Done.length}`);
+
+  await runStage<ExaSearchResponse, IndustryData>({
+    name: 'industry',
+    companies: stage17Todo,
+    batchSize: 2,
+    retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
+    call: (domains) => scheduleExa(() => industryExaSearch(domains)),
+    parse: (raw, batch) => parseIndustryResponse(raw, batch),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Industry', batchResults, formatIndustryForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage17Slug]: formatIndustryForAttio(r.data) });
         }
       }
     },

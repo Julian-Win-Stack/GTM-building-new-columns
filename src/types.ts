@@ -21,6 +21,7 @@ export type EnrichableColumn =
   | 'Revenue Growth'
   | 'AI adoption mindset'
   | 'AI SRE maturity'
+  | 'Industry'
   | 'Reason for Rejection';
 
 export type EnrichmentResult = {
@@ -43,6 +44,7 @@ export type EnrichmentResult = {
   'Revenue Growth': string;
   'AI adoption mindset': string;
   'AI SRE maturity': string;
+  'Industry': string;
   'Reason for Rejection': string;
 };
 

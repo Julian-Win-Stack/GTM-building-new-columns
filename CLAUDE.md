@@ -56,7 +56,7 @@ src/
     cloudTool.ts        — Stage 6: parser (structured JSON), gate (pass on AWS/GCP/Both/no-evidence; reject other clouds), Attio formatter (`<Tool>: <url>` or "No evidence found")
     fundingGrowth.ts    — Stage 7: parser (structured JSON), no gate, Attio formatter (Growth / Timeframe / Evidence multi-line)
     revenueGrowth.ts    — Stage 8: parser (structured JSON), no gate, Attio formatter (Growth / Evidence / Reasoning / Confidence multi-line)
-    numberOfUsers.ts    — Stage 3: parser (structured JSON, includes user_count_numeric integer), conditional gate (B2B AND user_count_numeric > 0 AND < 100k), Attio formatter (single-line "No user count found (even estimate)" when numeric=0); exports extractUserCountNumericFromCached
+    numberOfUsers.ts    — Stage 3: parser (structured JSON, includes user_count_bucket enum), conditional gate (B2B AND bucket NOT "100K+" AND bucket NOT "unknown"), Attio formatter (multi-line with bucket field); exports extractUserCountBucketFromCached, UserCountBucket
     numberOfEngineers.ts — Stage 9: Apollo api_search parser, no gate, Attio formatter (plain integer string e.g. "47"); exports ENGINEER_TITLES
     numberOfSres.ts      — Stage 10: Apify harvestapi parser (counts items), no gate, Attio formatter (plain integer string e.g. "3", or "N/A" when no LinkedIn URL); exports SRE_TITLES
     engineerHiring.ts    — Stage 11+12: Apify career-site-job-listing-feed parser (one call → two columns), no gate, Attio formatters for Engineer Hiring and SRE Hiring; exports ENGINEER_HIRING_TITLE_SEARCH, ENGINEER_HIRING_TITLE_EXCLUSIONS
@@ -64,12 +64,13 @@ src/
     recentIncidents.ts  — Stage 14: Statuspage v2 parser (drops dates, keeps impact + component names), no gate, Attio formatter (counts line + top components + per-incident list, or "Private status page" / "No status page found" / "0 incidents (last 90 days)")
     aiAdoptionMindset.ts — Stage 15: text parser (passes Exa text output through verbatim), no gate, Attio formatter (verbatim Classification/Confidence/Evidence/Reasoning block)
     aiSreMaturity.ts    — Stage 16: text parser (passes Exa text output through verbatim), no gate, Attio formatter (verbatim Classification/Confidence/Sales signal/Evidence/Reasoning block)
+    industry.ts         — Stage 17: parser (structured JSON, enum-enforced 23-category list), no gate, Attio formatter (two-line `industry: X\nreason: Y`); off-enum values yield error (cell left blank for retry)
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
 
 ## Concurrency & rate limits
-All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 10 QPS ceiling with safety headroom (default 8 QPS). All outbound TheirStack calls must go through `scheduleTheirstack()`, which enforces 300 RPM (free-plan ceiling) with safety headroom (default 4 QPS). All outbound Apollo calls must go through `scheduleApollo()`, which enforces the plan's 200/min cap with safety headroom (default 3 QPS = 180/min). Apollo also has a 6000/hour cap — 429s from the hourly cap are handled by runStage retry-with-backoff. All outbound Apify calls must go through `scheduleApify()`, which enforces a concurrency cap (default `p-limit(10)`) — Apify run-sync calls are long-running (30s–2 min), so concurrency rather than QPS is the right shape. If the actor returns `statusMessage === 'rate limited'` (LinkedIn hourly cap hit), `runHarvestLinkedInEmployees` throws so `runStage` records an error and leaves the Attio cell blank — the company will be retried on the next run. Set `APIFY_CONCURRENCY` to your Apify plan's actor concurrency ceiling to maximise throughput. Statuspage probes go through `scheduleStatuspage()`, which is concurrency-only (default `p-limit(20)`) — Statuspage has no documented rate limit and each probe hits a different host, so a local socket cap is all that's needed. Attio writes go through `attioWriteLimit` (default `p-limit(5)`). Azure OpenAI calls go through `openaiLimit` (default `p-limit(5)`).
+All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wraps Bottleneck and enforces Exa's 5 QPS ceiling for deep search with safety headroom (default 3 QPS). All outbound TheirStack calls must go through `scheduleTheirstack()`, which enforces 300 RPM (free-plan ceiling) with safety headroom (default 4 QPS). All outbound Apollo calls must go through `scheduleApollo()`, which enforces the plan's 200/min cap with safety headroom (default 3 QPS = 180/min). Apollo also has a 6000/hour cap — 429s from the hourly cap are handled by runStage retry-with-backoff. All outbound Apify calls must go through `scheduleApify()`, which enforces a concurrency cap (default `p-limit(10)`) — Apify run-sync calls are long-running (30s–2 min), so concurrency rather than QPS is the right shape. If the actor returns `statusMessage === 'rate limited'` (LinkedIn hourly cap hit), `runHarvestLinkedInEmployees` throws so `runStage` records an error and leaves the Attio cell blank — the company will be retried on the next run. Set `APIFY_CONCURRENCY` to your Apify plan's actor concurrency ceiling to maximise throughput. Statuspage probes go through `scheduleStatuspage()`, which is concurrency-only (default `p-limit(20)`) — Statuspage has no documented rate limit and each probe hits a different host, so a local socket cap is all that's needed. Attio writes go through `attioWriteLimit` (default `p-limit(5)`). Azure OpenAI calls go through `openaiLimit` (default `p-limit(5)`).
 
 `runStage` fires all batches concurrently — back-pressure comes from the relevant rate limiter, not from sequential looping. Each batch:
 1. Calls `call()` (rate-limited by Bottleneck or pLimit).
@@ -78,7 +79,7 @@ All outbound Exa calls must go through `scheduleExa()` in `rateLimit.ts`. It wra
 4. `afterBatch` (usually Attio writes) fires as soon as the batch resolves, independently of other batches. afterBatch errors are logged and swallowed — they never abort the stage.
 
 Tunables in `.env`:
-- `EXA_QPS` (default 8) — Exa calls per second
+- `EXA_QPS` (default 5) — Exa calls per second (matches Exa's hard limit for deep search)
 - `EXA_RETRY_TRIES` (default 3)
 - `EXA_RETRY_BASE_MS` (default 1000)
 - `ATTIO_WRITE_CONCURRENCY` (default 5) — max in-flight Attio upserts
@@ -92,7 +93,7 @@ Tunables in `.env`:
 - `APIFY_CONCURRENCY` (default 10) — max concurrent Apify run-sync calls; set to match your Apify plan's actor concurrency limit (free=3, personal=10, team=25+)
 - `APIFY_RETRY_TRIES` (default 3)
 - `APIFY_RETRY_BASE_MS` (default 2000)
-- `TWITTER_API_QPS` (default 50) — twitterapi.io calls per second (provider allows 1000+ RPS)
+- `TWITTER_API_QPS` (default 10) — twitterapi.io calls per second (provider allows 1000+ RPS)
 - `TWITTER_API_RETRY_TRIES` (default 3)
 - `TWITTER_API_RETRY_BASE_MS` (default 1000)
 - `STATUSPAGE_CONCURRENCY` (default 20) — max concurrent Statuspage probes; no QPS limit (Statuspage has no documented rate limit and probes hit different hosts)
@@ -103,7 +104,9 @@ Tunables in `.env`:
 
 `enrich-all` processes all companies stage-by-stage (not row-by-row), to preserve Exa's batch-of-2 cost efficiency.
 
-Flow: load CSV → pre-fetch Attio records (so already-filled companies can be skipped per-stage) → Stage 1 (all companies, concurrent within Exa QPS) → Attio write per batch as results arrive → filter survivors → Stage 2 (survivors only) → … → write final results.
+Flow: load CSV → pre-fetch ALL Attio records (unfiltered) → merge: processing set = CSV companies ∪ any Attio record with empty `Reason for Rejection` → Stage 1 → Attio write per batch as results arrive → filter survivors → Stage 2 → … → write final results.
+
+The processing set includes Attio records that are no longer in the current CSV, as long as they have not been rejected at any gate. Attio records whose `Reason for Rejection` column is filled are excluded (stay as-is). For Attio-only companies, the company name and LinkedIn URL come from the Attio record itself.
 
 No on-disk progress ledger. Resume semantics come from the Attio pre-fetch: on startup, any company whose target column is already populated is skipped for that stage.
 
@@ -115,7 +118,7 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 |---|---|---|---|
 | 1 | Competitor Tooling | *local match* | company name NOT in any competitor-tool customer list (Resolve.ai, Rootly, Incident.io, FireHydrant, PagerDuty, Opsgenie, xMatters, Splunk On-Call, BigPanda, Moogsoft) |
 | 2 | Digital Native | Exa | category is NOT `NOT Digital-native` |
-| 3 | Number of Users | Exa | conditional: for `Digital-native B2B` only — `user_count_numeric` must be > 0 AND >= 100,000; non-B2B, fetch errors, and numeric=0 pass unconditionally (numeric=0 writes "No user count found (even estimate)" to the column) |
+| 3 | Number of Users | Exa | conditional: for `Digital-native B2B` only — `user_count_bucket` must be `100K+`; non-B2B, fetch errors, and `unknown` bucket pass unconditionally (unknown = flag for human review, not rejected) |
 | 4 | Observability Tool | Exa | no tool evidence OR at least one of: Datadog, Grafana, Prometheus |
 | 5 | Communication Tool | TheirStack | no evidence OR uses Slack (reject if Microsoft Teams / Microsoft) |
 | 6 | Cloud Tool | Exa | no evidence OR uses AWS OR GCP |
@@ -129,6 +132,7 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 14 | Recent incidents ( Official ) | Statuspage v2 | no gate — data collection only |
 | 15 | AI adoption mindset | Exa | no gate — data collection only |
 | 16 | AI SRE maturity | Exa | no gate — data collection only |
+| 17 | Industry | Exa | no gate — data collection only |
 
 Stages 1–6 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing. Immediately after each gate, rejected companies receive a `Reason for Rejection` value written to Attio (crash-safe, via `writeRejectionReasons` in `src/writeRejectionReason.ts`). The reason format is `"<Stage name>: <specific reason>"` (e.g. `"Cloud Tool: uses Azure (not AWS/GCP)"`). Errored companies (fetch/parse failure) are not written — they will be retried on the next run.
 
@@ -145,7 +149,13 @@ Format varies by column:
 Confidence: <High | Medium | Low>
 
 Reasoning: <Exa's reason text>
+
+Sources:
+<url1>
+<url2>
+...
 ```
+The `Sources:` block is omitted when Exa returns no source links.
 
 **Observability Tool** — per-tool lines, one per found tool (no confidence/reasoning):
 ```
@@ -220,9 +230,11 @@ If evidence, source date, or reasoning are empty, those lines are omitted. Confi
 
 **Number of Users** — multi-line string:
 ```
-User count: <count, e.g. "10,000 customers" or "~500K MAU (estimated)">
+User count: <human-readable description, e.g. "~500K MAU per 2024 blog post" or "unknown">
 
-Reasoning: <how the count was determined, including math when inferred>
+User count bucket: <<100 | 100–1K | 1K–10K | 10K–100K | 100K+ | unknown>
+
+Reasoning: <what evidence was found, or why it is unknown>
 
 Source link: <source URL>
 
@@ -230,8 +242,8 @@ Source date: <ISO date or month/quarter/year, e.g. "2024-03-15" or "Q1 2024">
 
 Confidence: <high | medium | low>
 ```
-If reasoning, source_link, or source_date are empty, those lines are omitted. Confidence is always present. Exa is required to infer a numeric estimate from proxy signals (ARR ÷ ACV, headcount, traffic, app downloads, funding stage) when no exact count is publicly disclosed — `"Insufficient data"` is reserved for the rare case of zero usable signals.
-Stage 3 gate: Exa returns `user_count_numeric` (integer). For `Digital-native B2B` companies, the gate passes only if `user_count_numeric >= 100000`. Non-B2B categories pass unconditionally. Fetch errors pass (transient). `user_count_numeric = 0` (Insufficient data) → **pass** — the column is written as the single-line literal `"No user count found (even estimate)"` and the company continues. Only B2B companies with a known positive count below 100,000 are rejected.
+If reasoning, source_link, or source_date are empty, those lines are omitted. Confidence is always present. Exa uses only directly disclosed evidence (press releases, official claims, ARR÷ACV when both values are explicitly stated, third-party estimates from Sacra/Growjo/Latka); funding stage benchmarks and headcount ratios are not used.
+Stage 3 gate: Exa returns `user_count_bucket`. For `Digital-native B2B` companies, the gate passes only if `user_count_bucket === '100K+'`. Non-B2B categories pass unconditionally. Fetch errors pass (transient). `user_count_bucket === 'unknown'` → **pass** — the company continues but is flagged for human review. Only B2B companies with a known bucket below 100K are rejected.
 
 **Number of Engineers** — plain integer as string (e.g. `47` or `0`). `0` is written when Apollo returns no matches — do not leave blank.
 
@@ -321,18 +333,26 @@ Reasoning:
 ```
 Stage 16 is per-company (batchSize: 1). The query, `additionalQueries`, and `systemPrompt` are all company-specific (domain + companyName substituted at runtime). No link validation. Operates on `survivorsAfterStage6` independently of Stage 15.
 
+**Industry** — two-line string:
+```
+industry: <one category from the 23-item allowed list, or Unknown>
+reason: <brief justification based on the company's core business>
+```
+23 allowed categories: E-commerce, Marketplaces, Fintech, Payments, Crypto / Web3, Consumer social, Media / Streaming, Gaming, On-demand / Delivery, Logistics / Mobility, Travel / Booking, SaaS (B2B), SaaS (prosumer / PLG), Developer tools / APIs, Data / AI platforms, Cybersecurity, Adtech / Martech, Ride-sharing / transportation networks, Food tech, Creator economy platforms, Market data / trading platforms, Real-time communications (chat, voice, video APIs), IoT / connected devices platforms. `Unknown` is used when information is insufficient. If Exa returns a value outside this list, the cell is left blank and the company is retried next run.
+Stage 17 is batch-of-2 (batchSize: 2). Uses a structured JSON outputSchema with the enum declared so Exa is constrained to one of the allowed values. Operates on `survivorsAfterStage6`.
+
 **LinkedIn Page** — written once at pipeline start (pre-flight, before Stage 1) for companies that have no existing Attio record. Value comes directly from the `Company Linkedin Url` column in the input CSV. Not written for companies already in Attio.
 
-Stages 7–15 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
+Stages 7–17 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
 
 Stages 11 and 12 share a single `runStage` invocation (one Apify call per company) whose `afterBatch` writes both Engineer Hiring and SRE Hiring columns. Cache-skip requires both slugs to be non-empty; either blank triggers a fresh call.
 
 ### Exa output schema
-All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue Growth, Number of Users) use Exa's `outputSchema` (object with `companies[]`), not freeform text. Parsers read `raw.output.content` as a parsed object. AI Adoption Mindset is the exception — it uses `outputSchema: { type: 'text' }` and reads `raw.output.content` as a string passed through verbatim.
+All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue Growth, Number of Users, Industry) use Exa's `outputSchema` (object with `companies[]`), not freeform text. Parsers read `raw.output.content` as a parsed object. AI Adoption Mindset and AI SRE Maturity are the exceptions — they use `outputSchema: { type: 'text' }` and read `raw.output.content` as a string passed through verbatim.
 
 ### API mapping
 - **Local match (no API)**: Competitor Tooling
-- **Exa (batch of 2)**: Digital Native, Number of Users, Observability Tool, Cloud Tool, Funding Growth, Revenue Growth
+- **Exa (batch of 2)**: Digital Native, Number of Users, Observability Tool, Cloud Tool, Funding Growth, Revenue Growth, Industry
 - **Exa (batch of 1, per-company)**: AI adoption mindset, AI SRE maturity — uses `outputSchema: { type: 'text' }` + `additionalQueries` + `contents.highlights`; query and systemPrompt are company-specific
 - **TheirStack**: Communication Tool
 - **Apollo**: Number of Engineers
@@ -340,7 +360,6 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 - **Apify (fantastic-jobs/career-site-job-listing-feed)**: Engineer Hiring, SRE Hiring (single call per company feeds both columns)
 - **twitterapi.io + Azure OpenAI**: Customer complains on X (paginated tweet fetch → OpenAI 4-bucket classifier)
 - **Statuspage v2 (no auth)**: Recent incidents ( Official ) — probes `status.{domain}` then `{slug}.statuspage.io`, paginates 90-day window, no OpenAI
-- **TBD**: AI SRE maturity
 
 ## Commands
 ```

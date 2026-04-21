@@ -25,7 +25,7 @@ export const KEYS = {
 
 export const CONCURRENCY = Number(process.env.CONCURRENCY ?? 3);
 
-export const EXA_QPS = Number(process.env.EXA_QPS ?? 8);
+export const EXA_QPS = Number(process.env.EXA_QPS ?? 5);
 export const EXA_RETRY_TRIES = Number(process.env.EXA_RETRY_TRIES ?? 3);
 export const EXA_RETRY_BASE_MS = Number(process.env.EXA_RETRY_BASE_MS ?? 1000);
 export const ATTIO_WRITE_CONCURRENCY = Number(process.env.ATTIO_WRITE_CONCURRENCY ?? 5);
@@ -39,7 +39,7 @@ export const APOLLO_RETRY_BASE_MS = Number(process.env.APOLLO_RETRY_BASE_MS ?? 1
 export const APIFY_CONCURRENCY = Number(process.env.APIFY_CONCURRENCY ?? 10);
 export const APIFY_RETRY_TRIES = Number(process.env.APIFY_RETRY_TRIES ?? 3);
 export const APIFY_RETRY_BASE_MS = Number(process.env.APIFY_RETRY_BASE_MS ?? 2000);
-export const TWITTER_API_QPS = Number(process.env.TWITTER_API_QPS ?? 0.2);
+export const TWITTER_API_QPS = Number(process.env.TWITTER_API_QPS ?? 10);
 export const TWITTER_API_RETRY_TRIES = Number(process.env.TWITTER_API_RETRY_TRIES ?? 3);
 export const TWITTER_API_RETRY_BASE_MS = Number(process.env.TWITTER_API_RETRY_BASE_MS ?? 1000);
 export const STATUSPAGE_CONCURRENCY = Number(process.env.STATUSPAGE_CONCURRENCY ?? 20);
@@ -65,4 +65,5 @@ export const ENRICHABLE_COLUMNS = [
   'Revenue Growth',
   'AI adoption mindset',
   'AI SRE maturity',
+  'Industry',
 ] as const;

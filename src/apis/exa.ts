@@ -61,7 +61,17 @@ Rule 1 — Is the core product digital?
    Ask: "Is the digital platform itself the product, or merely a supporting tool for an otherwise physical/traditional business?" 
    Classify as NOT Digital-native ONLY IF the digital component is a supporting tool e.g., a restaurant using a reservation app, a gym using membership software).
    Classify as Digital-native IF the company's core value proposition IS the digital platform — even if it coordinates physical goods or in-person services — provided the platform serves at least hundreds of active users and the business could not exist without its digital infrastructure (e.g., DoorDash, Uber, Airbnb). 
-   In these cases, the physical fulfillment is a downstream output of the platform, not the core product.
+   In these cases, the physical fulfillment is a downstream output of the platform, not the core product. SPECIAL CASE — IT Consulting & Managed Services:
+     If the company's primary revenue comes from selling human expertise, professional
+  services, staff augmentation, or managed IT services — even if they build or
+  integrate software for clients — classify as NOT Digital-native.
+     These companies use software as a delivery vehicle, not as their core product.
+     The reason field MUST state: "Rejected: this is an IT consulting / professional
+  services company. The core value delivered is human expertise and services, not a
+  scalable digital platform."
+     Examples: IT staffing firms, systems integrators, managed service providers,
+  technology consultancies, offshore development shops.
+     Apply this check BEFORE Rule 1. If it matches, stop and return NOT Digital-native.
 
 Rule 2 — Who is the daily end-user of the software?
    If the business customer's own employees are the primary daily users of the platform (e.g., recruiters using a CRM, HR teams using an HRIS, finance teams using ERP), classify as B2B — not B2B2C.
@@ -98,6 +108,7 @@ For each input company domain, return one object in the "companies" array with:
    - category: one of the five categories above
    - confidence: High | Medium | Low
    - reason: 2–3 sentences referencing specific product behavior — who uses it daily, what the platform outputs, and whether consumers are the core value driver. Do not rely solely on company descriptions or marketing language.
+   - source_links: array of URLs you consulted to reach the classification (homepage, About page, product pages, news articles, etc.). Include every URL that was meaningful to the decision. Return [] if no sources were found.
 
 Always include every requested domain in the companies array, even if confidence is Low.`;
 
@@ -122,8 +133,9 @@ const DIGITAL_NATIVE_OBJECT_SCHEMA = {
           },
           confidence: { type: 'string', enum: ['High', 'Medium', 'Low'] },
           reason: { type: 'string' },
+          source_links: { type: 'array', items: { type: 'string' } },
         },
-        required: ['domain', 'category', 'confidence', 'reason'],
+        required: ['domain', 'category', 'confidence', 'reason', 'source_links'],
       },
     },
   },
@@ -443,63 +455,43 @@ export async function revenueGrowthExaSearch(domains: string[]): Promise<ExaSear
   });
 }
 
-const SYSTEM_PROMPT_NUMBER_OF_USERS = `Research the total number of users, customers, or accounts for the companies. You MUST always return a numeric estimate — never skip with "Not publicly disclosed" or "Unknown" unless you have genuinely found zero usable signals.
+const SYSTEM_PROMPT_NUMBER_OF_USERS = `Research the total number of users, customers, or accounts for the companies. Return "unknown" when direct evidence is not available — do not estimate from funding stage, employee headcount, or web traffic alone.
 
-STEP 1 — Look for an exact disclosed count.
-Search official sources: press releases, blog posts, earnings calls, SEC filings, S-1s, founder interviews, verified news, the company's own homepage ("trusted by 10,000 teams" type claims), G2 / Trustpilot review counts, App Store / Google Play install counts. If an exact number is found, record it with the unit ("monthly active users", "paying customers", "registered accounts", "businesses", etc.), date, and source URL.
+STEP 1 — Search for directly disclosed counts.
+Accepted evidence:
+- Official sources: press releases, blog posts, earnings calls, SEC filings, S-1s, founder interviews, company homepage claims ("trusted by 10,000 teams"), verified news articles
+- G2 / Trustpilot review counts: multiply by 50–100x as a low-confidence proxy for actual customers
+- App Store / Google Play install counts or disclosed DAU/MAU figures
+- ARR ÷ ACV only when BOTH values are explicitly stated in the same public source (e.g. "$20M ARR" and "$5K ACV" both cited → ~4,000 customers)
+- Third-party estimates from Sacra, Growjo, Latka, CB Insights, or PitchBook
 
-STEP 2 — If no exact count is publicly disclosed, you MUST infer an estimated user count from proxy signals. Do NOT skip this step. Use any combination of these signals:
-* ARR or revenue ÷ average contract value (ACV) — e.g. $20M ARR ÷ $5K ACV ≈ 4,000 customers
-* Pricing tiers × headcount or funding stage — extrapolate likely customer mix
-* Funding stage benchmarks — Series A SaaS typically 50–500 customers; Series B 500–5,000; Series C 5,000+
-* Employee headcount × industry user-per-employee ratios (consumer apps: 100K–1M users/employee; SaaS: 50–500 customers/employee)
-* App store install counts, DAU/MAU figures, store rankings (data.ai, Sensor Tower)
-* Web traffic from SimilarWeb (monthly visits is a useful upper bound for free/freemium signups)
-* Number of enterprise logos × typical seat counts for the customer's industry
-* Geographic markets / countries served — proxy for scale
-* Third-party estimates from Sacra, Growjo, Latka, CB Insights, PitchBook, G2
+NOT acceptable as primary evidence:
+- Funding stage benchmarks alone (e.g. "Series B typically has 500–5,000 customers" is speculation, not evidence)
+- Employee headcount × ratio estimates
+- Web traffic / SimilarWeb data alone
 
-STEP 3 — Combine signals into an explicit numeric estimate.
-Always express inferred numbers with the "~" tilde and "(estimated)" suffix. Examples:
-- "~5,000 customers (estimated)"
-- "~250K MAU (estimated)"
-- "~80 enterprise customers (estimated)"
-Show your math in the reasoning field (e.g. "$15M ARR disclosed ÷ ~$3K average ACV from pricing page = ~5,000 customers").
+STEP 2 — Assign a bucket based only on what you found.
+Pick the single best-fit bucket:
+- "<100" — evidence shows fewer than 100 users/customers
+- "100–1K" — evidence points to 100–1,000
+- "1K–10K" — evidence points to 1,000–10,000
+- "10K–100K" — evidence points to 10,000–100,000
+- "100K+" — evidence points to 100,000 or more
+- "unknown" — no direct evidence found; do not guess
 
-STEP 4 — Confidence calibration:
-- "high" — direct disclosed count from official source within last 12 months
-- "medium" — strong proxy (e.g. ARR ÷ ACV with both numbers grounded; credible third-party estimate)
-- "low" — weak proxies (only headcount, only traffic), order-of-magnitude estimate
-
-G2 or Trustpilot review counts: multiply by 30–100x to estimate actual customer count (typical review rate is 1–3% of customers). Weight this as a low-confidence signal unless corroborated.
-
-Only return "Insufficient data" if ALL of the following are true:
-- No employee count on LinkedIn or Crunchbase
-- No funding history available
-- No app store presence or web traffic data
-- No pricing page or customer count claim found
-- No third-party estimates on Sacra, Growjo, Latka, G2, or CB Insights
-
-App store install counts: apply a 20–40% active-user discount for consumer apps (assume 60–80% of installs are dormant or churned). Use store rankings as a directional signal, not a precise count.
-
-Web traffic (SimilarWeb): only use as a proxy for consumer, freemium, or PLG-driven products. For sales-led B2B SaaS, disregard or use only as a sanity check, not a primary signal.
-
-If signals suggest different scales (e.g. large free user base vs small paid customer base), report both separately:
-- "paid_customers": "~500 paying customers (estimated)"
-- "free_users": "~2M registered/free users (estimated)"
-
-Only collapse them if the company is purely paid with no free tier.
+STEP 3 — Confidence calibration:
+- "high" — direct count from official source within last 12 months
+- "medium" — credible third-party estimate (Sacra, Growjo, Latka) or ARR÷ACV with both numbers explicitly disclosed
+- "low" — G2 review count multiplied; indirect or dated evidence; or bucket is "unknown"
 
 For each input company domain, return exactly one entry in companies[] with:
 - domain: the exact domain provided (lowercase, no www.)
-- user_count: the count, always with units (see Step 3 examples). Prefer "~N units (estimated)" when inferred.
-- user_count_numeric: the integer best estimate of the total user count using the largest meaningful denominator (prefer MAU/registered users over paying customers when both are known). Set to 0 only when user_count is "Insufficient data".
-- reasoning: 2–4 sentences showing the signals used and the math when inferred
-- source_link: the URL of the strongest supporting source used (source_link: for direct disclosures, link to the exact source. For inferred estimates, link to the single strongest signal used (e.g. the funding announcement if ARR multiple was the key input, the LinkedIn page if headcount was primary).)
-- source_date: the publication or "as-of" date of the source in source_link. Use ISO 8601 when an exact date is known (e.g. "2024-03-15"); use a month/quarter/year when the source is less precise (e.g. "March 2024", "Q1 2024", "2024"). Return "" only when no date can be determined from the source.
+- user_count: human-readable description of what was found (e.g. "~500K MAU per 2024 blog post", "unknown")
+- user_count_bucket: one of "<100", "100–1K", "1K–10K", "10K–100K", "100K+", "unknown"
+- reasoning: 1–3 sentences on what evidence was found, or why it is unknown
+- source_link: URL of the strongest source used, or "" when unknown
+- source_date: publication date in ISO 8601 or approximate form, or "" when unknown
 - confidence: "high", "medium", or "low"
-
-
 
 Always include every requested domain in the companies array.`;
 
@@ -513,13 +505,13 @@ const NUMBER_OF_USERS_OBJECT_SCHEMA = {
         properties: {
           domain: { type: 'string' },
           user_count: { type: 'string' },
-          user_count_numeric: { type: 'integer' },
+          user_count_bucket: { type: 'string', enum: ['<100', '100–1K', '1K–10K', '10K–100K', '100K+', 'unknown'] },
           reasoning: { type: 'string' },
           source_link: { type: 'string' },
           source_date: { type: 'string' },
           confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
         },
-        required: ['domain', 'user_count', 'user_count_numeric', 'reasoning', 'source_link', 'source_date', 'confidence'],
+        required: ['domain', 'user_count', 'user_count_bucket', 'reasoning', 'source_link', 'source_date', 'confidence'],
       },
     },
   },
@@ -529,7 +521,7 @@ const NUMBER_OF_USERS_OBJECT_SCHEMA = {
 export async function numberOfUsersExaSearch(domains: string[]): Promise<ExaSearchResponse> {
   if (domains.length === 0) throw new Error('numberOfUsersExaSearch: need at least 1 domain');
 
-  const query = `Estimate total users, customers, accounts, ARR, pricing, funding stage, employee headcount, app downloads, and web traffic for: ${domains.join(', ')}`;
+  const query = `Find total users, customers, or accounts for: ${domains.join(', ')}`;
 
   return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
     numResults: 10,
@@ -652,6 +644,90 @@ Rules:
 - Do not classify based on company size or valuation alone
 - If signals conflict, choose the strongest explicitly supported category and lower confidence
 - If evidence is insufficient, classify as unverified`;
+
+const INDUSTRY_CATEGORIES = [
+  'E-commerce',
+  'Marketplaces',
+  'Fintech',
+  'Payments',
+  'Crypto / Web3',
+  'Consumer social',
+  'Media / Streaming',
+  'Gaming',
+  'On-demand / Delivery',
+  'Logistics / Mobility',
+  'Travel / Booking',
+  'SaaS (B2B)',
+  'SaaS (prosumer / PLG)',
+  'Developer tools / APIs',
+  'Data / AI platforms',
+  'Cybersecurity',
+  'Adtech / Martech',
+  'Ride-sharing / transportation networks',
+  'Food tech',
+  'Creator economy platforms',
+  'Market data / trading platforms',
+  'Real-time communications (chat, voice, video APIs)',
+  'IoT / connected devices platforms',
+  'Unknown',
+] as const;
+
+const INDUSTRY_OBJECT_SCHEMA = {
+  type: 'object',
+  properties: {
+    companies: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string' },
+          industry: { type: 'string', enum: [...INDUSTRY_CATEGORIES] },
+          reason: { type: 'string' },
+        },
+        required: ['domain', 'industry', 'reason'],
+      },
+    },
+  },
+  required: ['companies'],
+} as const;
+
+const INDUSTRY_SYSTEM_PROMPT = `Classify each company's primary industry.
+
+Allowed Industry Categories (choose exactly one — no other values allowed):
+E-commerce | Marketplaces | Fintech | Payments | Crypto / Web3 | Consumer social | Media / Streaming | Gaming | On-demand / Delivery | Logistics / Mobility | Travel / Booking | SaaS (B2B) | SaaS (prosumer / PLG) | Developer tools / APIs | Data / AI platforms | Cybersecurity | Adtech / Martech | Ride-sharing / transportation networks | Food tech | Creator economy platforms | Market data / trading platforms | Real-time communications (chat, voice, video APIs) | IoT / connected devices platforms | Unknown
+
+Instructions:
+- Read the company description carefully.
+- Select 1 primary industry that best represents the core business.
+- If multiple apply, choose the dominant revenue-generating activity.
+- Do NOT invent new categories.
+- Do NOT over-classify (only one label).
+- If unclear or insufficient info → return "Unknown".
+
+For each input domain, return one object in the "companies" array with:
+- domain: the exact domain provided (lowercase, no www.)
+- industry: exactly one category from the allowed list above
+- reason: brief justification based on the company's core business (1–2 sentences)
+
+Always include every requested domain in the companies array.`;
+
+export async function industryExaSearch(domains: string[]): Promise<ExaSearchResponse> {
+  if (domains.length === 0) throw new Error('industryExaSearch: need at least 1 domain');
+
+  const query =
+    domains.length === 1
+      ? `Research for ${domains[0]}`
+      : `Research for ${domains.slice(0, -1).join(', ')} and ${domains[domains.length - 1]}`;
+
+  return await (exa.search as (q: string, opts: object) => Promise<ExaSearchResponse>)(query, {
+    numResults: 10,
+    outputSchema: INDUSTRY_OBJECT_SCHEMA,
+    stream: false,
+    systemPrompt: INDUSTRY_SYSTEM_PROMPT,
+    type: 'deep-reasoning',
+    contents: { highlights: true },
+  });
+}
 
 export async function aiSreMaturityExaSearch(
   companyName: string,

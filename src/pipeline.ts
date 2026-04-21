@@ -43,6 +43,7 @@ export async function runPipeline(
     'Revenue Growth': values['Revenue Growth'] ?? '',
     'AI adoption mindset': values['AI adoption mindset'] ?? '',
     'AI SRE maturity': values['AI SRE maturity'] ?? '',
+    'Industry': values['Industry'] ?? '',
     'Reason for Rejection': values['Reason for Rejection'] ?? '',
   };
   return result;

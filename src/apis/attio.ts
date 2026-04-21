@@ -22,6 +22,7 @@ export const FIELD_SLUGS: Record<string, string> = {
   'Revenue Growth': 'revenue_growth',
   'AI adoption mindset': 'ai_adoption_mindset',
   'AI SRE maturity': 'ai_sre_maturity',
+  'Industry': 'industry',
   'Reason for Rejection': 'reason_for_rejection',
 };
 
@@ -59,10 +60,10 @@ function extractValues(rec: RawAttioRecord): Record<string, string> {
 }
 
 export async function fetchAllRecords(
-  domains: string[],
+  domains?: string[] | null,
   client: { post: typeof http.post } = http
 ): Promise<Map<string, Record<string, string>>> {
-  const domainSet = new Set(domains);
+  const domainSet = domains ? new Set(domains) : null;
   const map = new Map<string, Record<string, string>>();
   let offset = 0;
   const limit = 500;
@@ -74,9 +75,9 @@ export async function fetchAllRecords(
 
     for (const rec of records) {
       const domain = extractDomain(rec);
-      if (domain && domainSet.has(domain)) {
-        map.set(domain, extractValues(rec));
-      }
+      if (!domain) continue;
+      if (domainSet && !domainSet.has(domain)) continue;
+      map.set(domain, extractValues(rec));
     }
 
     if (records.length < limit) break;
