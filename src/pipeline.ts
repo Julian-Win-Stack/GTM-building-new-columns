@@ -47,6 +47,8 @@ export async function runPipeline(
     'Industry': values['Industry'] ?? '',
     'Company Context Score': values['Company Context Score'] ?? '',
     'Change Detection Column for Developer': '',
+    'Tooling Match Score': values['Tooling Match Score'] ?? '',
+    'Tooling Match Change Detection for Developer': '',
     'Reason for Rejection': values['Reason for Rejection'] ?? '',
   };
   return result;

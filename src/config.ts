@@ -68,4 +68,5 @@ export const ENRICHABLE_COLUMNS = [
   'AI SRE maturity',
   'Industry',
   'Company Context Score',
+  'Tooling Match Score',
 ] as const;

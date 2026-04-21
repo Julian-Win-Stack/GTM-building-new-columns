@@ -67,6 +67,7 @@ import { parseAiAdoptionMindsetResponse, formatAiAdoptionMindsetForAttio, type A
 import { parseAiSreMaturityResponse, formatAiSreMaturityForAttio, type AiSreMaturityData } from '../stages/aiSreMaturity.js';
 import { parseIndustryResponse, formatIndustryForAttio, type IndustryData } from '../stages/industry.js';
 import { computeInputHash, scoreCompanyContext, formatContextScoreForAttio, type ContextScoreData } from '../stages/companyContextScore.js';
+import { scoreToolingMatch, formatToolingMatchScoreForAttio, TOOLING_MATCH_INPUT_COLUMNS, type ToolingMatchScoreData } from '../stages/toolingMatchScore.js';
 import { fetchAllRecords, upsertCompanyByDomain, upsertCompanyByLinkedInUrl, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
@@ -795,7 +796,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const stage18Slug = FIELD_SLUGS['Company Context Score']!;
   const hashSlug = FIELD_SLUGS['Change Detection Column for Developer']!;
   const enrichableSlugsForHash = (ENRICHABLE_COLUMNS as readonly string[])
-    .filter((c) => c !== 'Company Context Score')
+    .filter((c) => c !== 'Company Context Score' && c !== 'Tooling Match Score')
     .map((c) => FIELD_SLUGS[c]!);
 
   const stage18Eligible = survivorsAfterStage6.filter((c) => {
@@ -837,6 +838,58 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
           })
         );
         attioCache.set(r.company.domain, { ...values, [stage18Slug]: cell, [hashSlug]: hash });
+      }
+    },
+  });
+
+  // Stage 19 — Tooling Match Score (OpenAI scoring of 4 tooling cells, hash-gated re-run)
+  // Runs at the same level as Stage 18 — neither depends on the other. Hash covers only the 4 input cells.
+  const stage19Slug = FIELD_SLUGS['Tooling Match Score']!;
+  const stage19HashSlug = FIELD_SLUGS['Tooling Match Change Detection for Developer']!;
+  const toolingInputSlugs = (TOOLING_MATCH_INPUT_COLUMNS as readonly string[]).map((c) => FIELD_SLUGS[c]!);
+  const priorSlugsForStage19 = (ENRICHABLE_COLUMNS as readonly string[])
+    .filter((c) => c !== 'Company Context Score' && c !== 'Tooling Match Score')
+    .map((c) => FIELD_SLUGS[c]!);
+
+  const stage19Eligible = survivorsAfterStage6.filter((c) => {
+    const values = attioCache.get(c.domain) ?? {};
+    return priorSlugsForStage19.every((slug) => !!values[slug]);
+  });
+
+  const stage19Todo = stage19Eligible.filter((c) => {
+    const values = attioCache.get(c.domain) ?? {};
+    const currentHash = computeInputHash(values, toolingInputSlugs);
+    return values[stage19HashSlug] !== currentHash;
+  });
+
+  console.log(`[toolingMatchScore] eligible=${stage19Eligible.length} todo=${stage19Todo.length} hash-skipped=${stage19Eligible.length - stage19Todo.length}`);
+
+  await runStage<Record<string, string>, ToolingMatchScoreData>({
+    name: 'toolingMatchScore',
+    companies: stage19Todo,
+    batchSize: 1,
+    retry: { tries: 3, baseMs: 1000 },
+    call: (domains) => Promise.resolve(attioCache.get(domains[0]!) ?? {}),
+    parse: async (values, batch) => {
+      const company = batch[0]!;
+      const data = await scoreToolingMatch(company, values);
+      return [{ company, data }];
+    },
+    afterBatch: async (batchResults) => {
+      for (const r of batchResults) {
+        if (r.error !== undefined) continue;
+        const values = attioCache.get(r.company.domain) ?? {};
+        const hash = computeInputHash(values, toolingInputSlugs);
+        const cell = formatToolingMatchScoreForAttio(r.data);
+        await attioWriteLimit(() =>
+          upsertCompanyByDomain({
+            'Company Name': r.company.companyName,
+            'Domain': r.company.domain,
+            'Tooling Match Score': cell,
+            'Tooling Match Change Detection for Developer': hash,
+          })
+        );
+        attioCache.set(r.company.domain, { ...values, [stage19Slug]: cell, [stage19HashSlug]: hash });
       }
     },
   });

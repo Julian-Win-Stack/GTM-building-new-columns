@@ -18,6 +18,7 @@ const aiAdoptionMindset: EnricherFn = async (_input) => '';
 const aiSreMaturity: EnricherFn = async (_input) => '';
 const industry: EnricherFn = async (_input) => '';
 const companyContextScore: EnricherFn = async (_input) => '';
+const toolingMatchScore: EnricherFn = async (_input) => '';
 const reasonForRejection: EnricherFn = async (_input) => '';
 
 export const ENRICHERS: Record<EnrichableColumn, EnricherFn> = {
@@ -39,6 +40,7 @@ export const ENRICHERS: Record<EnrichableColumn, EnricherFn> = {
   'AI SRE maturity': aiSreMaturity,
   'Industry': industry,
   'Company Context Score': companyContextScore,
+  'Tooling Match Score': toolingMatchScore,
   'Reason for Rejection': reasonForRejection,
 };
 

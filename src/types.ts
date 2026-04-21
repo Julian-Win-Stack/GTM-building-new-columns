@@ -24,6 +24,7 @@ export type EnrichableColumn =
   | 'AI SRE maturity'
   | 'Industry'
   | 'Company Context Score'
+  | 'Tooling Match Score'
   | 'Reason for Rejection';
 
 export type EnrichmentResult = {
@@ -50,6 +51,8 @@ export type EnrichmentResult = {
   'Industry': string;
   'Company Context Score': string;
   'Change Detection Column for Developer': string;
+  'Tooling Match Score': string;
+  'Tooling Match Change Detection for Developer': string;
   'Reason for Rejection': string;
 };
 

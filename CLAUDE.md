@@ -68,6 +68,7 @@ src/
     aiSreMaturity.ts    — Stage 16: text parser (passes Exa text output through verbatim), no gate, Attio formatter (verbatim Classification/Confidence/Sales signal/Evidence/Reasoning block)
     industry.ts         — Stage 17: parser (structured JSON, enum-enforced 23-category list), no gate, Attio formatter (two-line `industry: X\nreason: Y`); off-enum values yield error (cell left blank for retry)
     companyContextScore.ts — Context Score State (Stage 18): OpenAI scorer (0–5, 0.5 increments) using all prior Attio cells; hash-gated re-run via `change_detection_column_for_developer`; exports computeInputHash, scoreCompanyContext, formatContextScoreForAttio
+    toolingMatchScore.ts   — Tooling Match Score (Stage 19): OpenAI scorer over 4 tooling cells (Communication Tool, Competitor Tooling, Observability Tool, Cloud Tool); hash-gated re-run via `tooling_match_change_detection_for_developer` (hash covers only those 4 inputs); exports scoreToolingMatch, formatToolingMatchScoreForAttio, parseToolingMatchResponse, TOOLING_MATCH_INPUT_COLUMNS
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
@@ -102,7 +103,7 @@ Tunables in `.env`:
 - `STATUSPAGE_CONCURRENCY` (default 20) — max concurrent Statuspage probes; no QPS limit (Statuspage has no documented rate limit and probes hit different hosts)
 - `STATUSPAGE_RETRY_TRIES` (default 3)
 - `STATUSPAGE_RETRY_BASE_MS` (default 1000)
-- `AZURE_OPENAI_DEPLOYMENT_PRO` (optional, default empty → falls back to `AZURE_OPENAI_DEPLOYMENT`) — stronger Azure deployment used exclusively by Stage 18 (Context Score State); set to `gpt-5.4-pro` to use the pro model
+- `AZURE_OPENAI_DEPLOYMENT_PRO` (optional, default empty → falls back to `AZURE_OPENAI_DEPLOYMENT`) — stronger Azure deployment used by Stage 18 (Company Context Score) and Stage 19 (Tooling Match Score); set to `gpt-5.4-pro` to use the pro model
 
 ## Stage-wise pipeline (enrich-all)
 
@@ -138,6 +139,7 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 16 | AI SRE maturity | Exa | no gate — data collection only |
 | 17 | Industry | Exa | no gate — data collection only |
 | 18 | Company Context Score | Azure OpenAI (`gpt-5.4-pro`) | no gate — synthesis over prior Attio cells |
+| 19 | Tooling Match Score | Azure OpenAI (`gpt-5.4-pro`) | no gate — scores 4 tooling cells; runs at same level as Stage 18 |
 
 Stages 2–6 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing. Immediately after each gate, rejected companies receive a `Reason for Rejection` value written to Attio (crash-safe, via `writeRejectionReasons` in `src/writeRejectionReason.ts`). The reason format is `"<Stage name>: <specific reason>"` (e.g. `"Cloud Tool: uses Azure (not AWS/GCP)"`). Errored companies (fetch/parse failure) are not written — they will be retried on the next run.
 
@@ -368,9 +370,29 @@ Stage 17 is batch-of-2 (batchSize: 2). Uses a structured JSON outputSchema with 
 Reasoning: <2–4 sentences covering product nature, reliability sensitivity, industry, scale, and business model>
 ```
 Score is one of: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5.
-Stage 18 is per-company (batchSize: 1). Uses Azure OpenAI (`gpt-5.4-pro` via `AZURE_OPENAI_DEPLOYMENT_PRO`, falls back to `AZURE_OPENAI_DEPLOYMENT`). Operates on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty in Attio.
+Stage 18 is per-company (batchSize: 1).
+
+**Tooling Match Score** — multi-line string:
+```
+Final Tool Score: <average of 4 sub-scores, e.g. 4.25>
+Communication Tool Score: <0 | 3 | 5>
+Competitor Tooling Score: <1 | 3 | 5>
+Observability Tool Score: <1 | 3 | 4 | 5>
+Cloud Tool Score: <4 | 5>
+
+Justification:
+- Communication Tool: <brief explanation, or "Not publicly confirmed">
+- Competitor Tooling: <brief explanation, or "Not publicly confirmed">
+- Observability Tool: <brief explanation, or "Not publicly confirmed">
+- Cloud Tool: <brief explanation, or "Not publicly confirmed">
+```
+Final Tool Score = (Communication Tool Score + Competitor Tooling Score + Observability Tool Score + Cloud Tool Score) / 4, computed locally (not trusted from the model). Sub-score rules: Communication 5=Slack, 3=no evidence, 0=Teams; Competitor 1=any 1-pt tool (Resolve.ai/Traversal/TierZero/RunLLM/Neubird/Wildmoose/Ciroos/Komodor/Mezmo), 3=Rootly/incident.io, 5=none; Observability 1=other sole tool, 5=Datadog sole, 4=Datadog+anything or Grafana/Prometheus, 3=no evidence; Cloud 5=AWS/GCP, 4=Azure or no evidence. Uses Azure OpenAI (`gpt-5.4-pro` via `AZURE_OPENAI_DEPLOYMENT_PRO`, falls back to `AZURE_OPENAI_DEPLOYMENT`). Operates on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty in Attio.
 
 **Re-run gating (hash-based):** Stage 18 re-scores only when inputs change. On each run, a sha256 hash of the 17 input cell values (concatenated slug=value pairs) is compared to the stored hash in `change_detection_column_for_developer`. If equal → skip (no OpenAI call). If different or missing → re-score and overwrite both `company_context_score` and `change_detection_column_for_developer`. Because the hash is stored in Attio (not on disk), change-detection is durable across weeks and across machines. Adding a new enrichable column upstream automatically invalidates all hashes and triggers a full re-score on the next run.
+
+Stage 19 uses independent hash-gating via `tooling_match_change_detection_for_developer`. Its hash covers only the 4 input cells (Communication Tool, Competitor Tooling, Observability Tool, Cloud Tool) — changes to other columns do not trigger a Stage 19 re-score. The two hash columns are fully independent: re-scoring one does not affect the other.
+
+Stage 19 is per-company (batchSize: 1). Uses Azure OpenAI (`gpt-5.4-pro` via `AZURE_OPENAI_DEPLOYMENT_PRO`, falls back to `AZURE_OPENAI_DEPLOYMENT`). Operates on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty. `computeInputHash` (exported from `companyContextScore.ts`) is reused.
 
 **Identity columns (Company Name, Domain, LinkedIn Page, Description)** — written once at pipeline start (before Stage 1) for every CSV row, via an "identity-write" step. Rules:
 - For each CSV row, fill any of the four columns that are currently **empty** in Attio using the CSV value. Never overwrite a non-empty Attio value (preserves human edits).
@@ -379,7 +401,7 @@ Stage 18 is per-company (batchSize: 1). Uses Azure OpenAI (`gpt-5.4-pro` via `AZ
 - If a CSV row has **neither** a Domain nor a LinkedIn URL, skip the row entirely (no write, not added to the stage processing set).
 - CSV rows with only a LinkedIn URL (no Website) are resolved against the Attio cache via LinkedIn URL lookup to obtain a domain for subsequent stages. If the Attio record doesn't exist yet, the identity-write upserts by `linkedin_page`, but the row will not participate in stages keyed by domain until a future run after Attio assigns a domain.
 
-Stages 7–17 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged. Stage 18 also operates on `survivorsAfterStage6` but applies an additional precondition: all 17 prior enrichable columns must be non-empty.
+Stages 7–17 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged. Stages 18 and 19 both operate on `survivorsAfterStage6` with the same precondition (all 17 prior enrichable columns must be non-empty) but are independent of each other — neither requires the other to have run first.
 
 Stages 11 and 12 share a single `runStage` invocation (one Apify call per company) whose `afterBatch` writes both Engineer Hiring and SRE Hiring columns. Cache-skip requires both slugs to be non-empty; either blank triggers a fresh call.
 
@@ -396,7 +418,7 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 - **Apify (fantastic-jobs/career-site-job-listing-feed)**: Engineer Hiring, SRE Hiring (single call per company feeds both columns)
 - **twitterapi.io + Azure OpenAI**: Customer complains on X (paginated tweet fetch → OpenAI 4-bucket classifier)
 - **Statuspage v2 (no auth)**: Recent incidents ( Official ) — probes `status.{domain}` then `{slug}.statuspage.io`, paginates 90-day window, no OpenAI
-- **Azure OpenAI (gpt-5.4-pro)**: Company Context Score (Stage 18) — feeds all 17 prior Attio cell values into a single structured-JSON judge() call; hash-gated re-run
+- **Azure OpenAI (gpt-5.4-pro)**: Company Context Score (Stage 18) — feeds all 17 prior Attio cell values into a single structured-JSON judge() call; hash-gated re-run; Tooling Match Score (Stage 19) — scores 4 tooling cells (Communication Tool, Competitor Tooling, Observability Tool, Cloud Tool); hash covers only those 4 inputs via `tooling_match_change_detection_for_developer`
 
 ## Commands
 ```
