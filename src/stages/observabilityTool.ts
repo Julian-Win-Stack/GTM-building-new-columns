@@ -246,6 +246,14 @@ export async function parseObservabilityToolResponse(
         if (gateTs.length > 0) {
           console.log(`[observabilityTool] ${company.domain}: TheirStack gate call found ${gateTs.map((t) => t.name).join(', ')}`);
           verified.push(...gateTs);
+          const gateNames = gateTs.map((t) => t.name.toLowerCase());
+          if (gateNames.includes('datadog') && !gateNames.includes('grafana')) {
+            const confirmTs = await fetchTheirStackTools(company.domain, ['grafana']);
+            if (confirmTs.length > 0) {
+              console.log(`[observabilityTool] ${company.domain}: TheirStack confirmation call found ${confirmTs.map((t) => t.name).join(', ')}`);
+              verified.push(...confirmTs);
+            }
+          }
         } else if (!hasOtherTools) {
           const otherTs = await fetchTheirStackTools(company.domain, THEIRSTACK_OTHER_SLUGS);
           if (otherTs.length > 0) {

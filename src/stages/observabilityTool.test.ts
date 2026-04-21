@@ -430,13 +430,13 @@ describe('parseObservabilityToolResponse — TheirStack fallback', () => {
     expect(results[0]!.data!.tools[0]!.name).toBe('Datadog');
   });
 
-  it('Scenario 2: Exa finds New Relic only, TheirStack returns Datadog → tool added, gate passes', async () => {
+  it('Scenario 2: Exa finds New Relic only, TheirStack returns Datadog → tool added, confirmation call fires for Grafana (returns empty), gate passes', async () => {
     mockTheirStack.mockResolvedValueOnce(makeTheirStackJob(['datadog']));
     const raw = makeRaw({
       companies: [{ domain: 'quizlet.com', toolsText: 'New Relic: https://jobs.example.com/nr' }],
     });
     const results = await parseObservabilityToolResponse(raw, [co1]);
-    expect(mockTheirStack).toHaveBeenCalledOnce();
+    expect(mockTheirStack).toHaveBeenCalledTimes(2);
     const names = results[0]!.data!.tools.map((t) => t.name);
     expect(names).toContain('Datadog');
     expect(names).toContain('New Relic');
@@ -465,11 +465,11 @@ describe('parseObservabilityToolResponse — TheirStack fallback', () => {
     expect(names).toContain('Grafana');
   });
 
-  it('Scenario 3: Exa empty, TheirStack gate call returns Datadog → added, no second call', async () => {
+  it('Scenario 3: Exa empty, TheirStack gate call returns Datadog → added, confirmation call fires for Grafana (returns empty), gate passes', async () => {
     mockTheirStack.mockResolvedValueOnce(makeTheirStackJob(['datadog']));
     const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
     const results = await parseObservabilityToolResponse(raw, [co1]);
-    expect(mockTheirStack).toHaveBeenCalledOnce();
+    expect(mockTheirStack).toHaveBeenCalledTimes(2);
     expect(results[0]!.data!.tools[0]!.name).toBe('Datadog');
     expect(observabilityToolGate(results[0]!.data!)).toBe(true);
   });
@@ -501,6 +501,40 @@ describe('parseObservabilityToolResponse — TheirStack fallback', () => {
     const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
     const results = await parseObservabilityToolResponse(raw, [co1]);
     expect(results[0]!.data!.tools).toHaveLength(0);
+  });
+
+  it('Confirmation call: gate returns only Datadog, confirmation call returns Grafana → both tools in result, Grafana URL from second call', async () => {
+    mockTheirStack
+      .mockResolvedValueOnce(makeTheirStackJob(['datadog'], 'https://jobs.ts.com/dd'))
+      .mockResolvedValueOnce(makeTheirStackJob(['grafana'], 'https://jobs.ts.com/gr'));
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalledTimes(2);
+    const tools = results[0]!.data!.tools;
+    const dd = tools.find((t) => t.name === 'Datadog');
+    const gr = tools.find((t) => t.name === 'Grafana');
+    expect(dd).toBeDefined();
+    expect(gr).toBeDefined();
+    expect(dd!.sourceUrl).toBe('https://jobs.ts.com/dd');
+    expect(gr!.sourceUrl).toBe('https://jobs.ts.com/gr');
+    expect(observabilityToolGate(results[0]!.data!)).toBe(true);
+  });
+
+  it('Confirmation call: gate returns only Datadog, confirmation call returns empty → only Datadog, 2 calls total', async () => {
+    mockTheirStack.mockResolvedValueOnce(makeTheirStackJob(['datadog']));
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalledTimes(2);
+    const names = results[0]!.data!.tools.map((t) => t.name);
+    expect(names).toEqual(['Datadog']);
+  });
+
+  it('Confirmation call: gate returns only Grafana → no confirmation call, 1 call total', async () => {
+    mockTheirStack.mockResolvedValueOnce(makeTheirStackJob(['grafana']));
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalledOnce();
+    expect(results[0]!.data!.tools[0]!.name).toBe('Grafana');
   });
 });
 
