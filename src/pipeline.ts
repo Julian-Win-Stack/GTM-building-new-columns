@@ -51,6 +51,8 @@ export async function runPipeline(
     'Tooling Match Change Detection for Developer': '',
     'Intent Signal Score': values['Intent Signal Score'] ?? '',
     'Intent Signal Change Detection for Developer': '',
+    'Final Score': values['Final Score'] ?? '',
+    'Final Score Change Detection for Developer': '',
     'Reason for Rejection': values['Reason for Rejection'] ?? '',
   };
   return result;

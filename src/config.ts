@@ -70,4 +70,5 @@ export const ENRICHABLE_COLUMNS = [
   'Company Context Score',
   'Tooling Match Score',
   'Intent Signal Score',
+  'Final Score',
 ] as const;

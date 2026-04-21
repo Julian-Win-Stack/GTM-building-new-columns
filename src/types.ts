@@ -26,6 +26,7 @@ export type EnrichableColumn =
   | 'Company Context Score'
   | 'Tooling Match Score'
   | 'Intent Signal Score'
+  | 'Final Score'
   | 'Reason for Rejection';
 
 export type EnrichmentResult = {
@@ -56,6 +57,8 @@ export type EnrichmentResult = {
   'Tooling Match Change Detection for Developer': string;
   'Intent Signal Score': string;
   'Intent Signal Change Detection for Developer': string;
+  'Final Score': string;
+  'Final Score Change Detection for Developer': string;
   'Reason for Rejection': string;
 };
 

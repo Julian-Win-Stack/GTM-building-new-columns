@@ -30,6 +30,8 @@ export const FIELD_SLUGS: Record<string, string> = {
   'Tooling Match Change Detection for Developer': 'tooling_match_change_detection_for_developer',
   'Intent Signal Score': 'intent_signal_score',
   'Intent Signal Change Detection for Developer': 'intent_signal_change_detection_for_developer',
+  'Final Score': 'account_score',
+  'Final Score Change Detection for Developer': 'final_score_change_detection_for_developer',
   'Reason for Rejection': 'reason_for_rejection',
 };
 

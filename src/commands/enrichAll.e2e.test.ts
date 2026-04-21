@@ -250,6 +250,26 @@ beforeEach(async () => {
     if (args.schema?.name === 'company_context_score') {
       return Promise.resolve({ score: 4.5, reasoning: 'High-scale platform.' });
     }
+    if (args.schema?.name === 'tooling_match_score') {
+      return Promise.resolve({
+        communication_tool_score: 5,
+        competitor_tooling_score: 5,
+        observability_tool_score: 5,
+        cloud_tool_score: 5,
+        justification: {
+          communication_tool: 'Slack confirmed',
+          competitor_tooling: 'No competitors',
+          observability_tool: 'Datadog sole',
+          cloud_tool: 'AWS confirmed',
+        },
+      });
+    }
+    if (args.schema?.name === 'intent_signal_score') {
+      return Promise.resolve({ score: 4.5, reasoning: 'Strong intent signals.' });
+    }
+    if (args.schema?.name === 'final_score_reasoning') {
+      return Promise.resolve({ reasoning: 'Strong overall ICP fit with clear intent signals.' });
+    }
     return Promise.resolve({ verdict: 'yes', reason: 'confirmed' });
   });
 
@@ -392,9 +412,9 @@ describe('input routing', () => {
 
     await enrichAll({ csv: csvPath });
 
-    // With all 17 stage columns cached, only identity write + Stage 18 fire.
-    // Stage 18 runs because no hash is stored yet (change_detection_column_for_developer is blank).
-    expect(m.upsertByDomain).toHaveBeenCalledTimes(2);
+    // With all 17 stage columns cached, Stages 18/19/20/21 fire (no hashes stored yet)
+    // plus the identity write = 5 total upsertByDomain calls.
+    expect(m.upsertByDomain).toHaveBeenCalledTimes(5);
     const [identityWriteArg] = m.upsertByDomain.mock.calls[0] as [Record<string, unknown>];
 
     expect(identityWriteArg['Company Name']).toBeUndefined();
@@ -434,7 +454,7 @@ describe('csv-attio merge', () => {
 // Group 4 — Happy path (all 17 stages)
 // ---------------------------------------------------------------------------
 describe('happy path', () => {
-  it('runs a single company through all 18 stages and writes each column', async () => {
+  it('runs a single company through all 21 stages and writes each column', async () => {
     const csvPath = await makeCsv(tmpDir, [
       {
         'Company Name': 'Acme',
@@ -472,6 +492,12 @@ describe('happy path', () => {
       'Industry',
       'Company Context Score',
       'Change Detection Column for Developer',
+      'Tooling Match Score',
+      'Tooling Match Change Detection for Developer',
+      'Intent Signal Score',
+      'Intent Signal Change Detection for Developer',
+      'Final Score',
+      'Final Score Change Detection for Developer',
     ];
     for (const col of expectedColumns) {
       expect(allColumnArgs, `expected "${col}" to be written`).toContain(col);
