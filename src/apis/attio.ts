@@ -6,6 +6,7 @@ export const FIELD_SLUGS: Record<string, string> = {
   'Company Name': 'company_name',
   'Domain': 'domain',
   'LinkedIn Page': 'linkedin_page',
+  'Description': 'description',
   'Digital Native': 'digital_native',
   'Cloud Tool': 'cloud_tool',
   'Observability Tool': 'observability_tool',
@@ -87,16 +88,6 @@ export async function fetchAllRecords(
   return map;
 }
 
-export async function findCompanyByName(name: string): Promise<string | null> {
-  const res = await http.post(`/objects/${KEYS.attioObjectSlug}/records/query`, {
-    filter: { company_name: { $eq: name } },
-    limit: 1,
-  });
-  const rec = res.data?.data?.[0] as RawAttioRecord | undefined;
-  if (!rec) return null;
-  return extractDomain(rec) || null;
-}
-
 export async function findCompanyByDomain(domain: string): Promise<AttioRecord | null> {
   const res = await http.post(`/objects/${KEYS.attioObjectSlug}/records/query`, {
     filter: { domain: { $eq: domain } },
@@ -124,6 +115,17 @@ export async function upsertCompanyByDomain(data: Partial<EnrichmentResult>): Pr
     `/objects/${KEYS.attioObjectSlug}/records`,
     { data: { values } },
     { params: { matching_attribute: 'domain' } }
+  );
+  const rec = res.data?.data;
+  return { id: rec.id?.record_id ?? rec.id, values: rec.values ?? {} };
+}
+
+export async function upsertCompanyByLinkedInUrl(data: Partial<EnrichmentResult>): Promise<AttioRecord> {
+  const values = toAttioValues(data);
+  const res = await http.put(
+    `/objects/${KEYS.attioObjectSlug}/records`,
+    { data: { values } },
+    { params: { matching_attribute: 'linkedin_page' } }
   );
   const rec = res.data?.data;
   return { id: rec.id?.record_id ?? rec.id, values: rec.values ?? {} };

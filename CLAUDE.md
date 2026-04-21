@@ -32,7 +32,7 @@ src/
   rejectionReasons.ts — one reason-string builder per gate stage (fresh-data + cached-string variants)
   writeRejectionReason.ts — crash-safe Attio writer for the Reason for Rejection column; rate-limited via attioWriteLimit
   apis/
-    attio.ts        — Attio REST client: find/create/update/upsertCompanyByDomain
+    attio.ts        — Attio REST client: findCompanyByDomain, create/update, upsertCompanyByDomain, upsertCompanyByLinkedInUrl
     exa.ts          — Exa search calls; ExaSearchResponse type; most stage functions use structured JSON outputSchema + type:'deep-reasoning'; aiAdoptionMindsetExaSearch and aiSreMaturityExaSearch use text outputSchema (outputSchema: { type: 'text' })
     apify.ts        — Apify actor client: runHarvestLinkedInEmployees (harvestapi/linkedin-company-employees, run-sync via SDK); runCareerSiteJobListings (fantastic-jobs/career-site-job-listing-feed, run-sync via SDK)
     openai.ts       — Azure OpenAI wrapper
@@ -341,7 +341,12 @@ reason: <brief justification based on the company's core business>
 23 allowed categories: E-commerce, Marketplaces, Fintech, Payments, Crypto / Web3, Consumer social, Media / Streaming, Gaming, On-demand / Delivery, Logistics / Mobility, Travel / Booking, SaaS (B2B), SaaS (prosumer / PLG), Developer tools / APIs, Data / AI platforms, Cybersecurity, Adtech / Martech, Ride-sharing / transportation networks, Food tech, Creator economy platforms, Market data / trading platforms, Real-time communications (chat, voice, video APIs), IoT / connected devices platforms. `Unknown` is used when information is insufficient. If Exa returns a value outside this list, the cell is left blank and the company is retried next run.
 Stage 17 is batch-of-2 (batchSize: 2). Uses a structured JSON outputSchema with the enum declared so Exa is constrained to one of the allowed values. Operates on `survivorsAfterStage6`.
 
-**LinkedIn Page** — written once at pipeline start (pre-flight, before Stage 1) for companies that have no existing Attio record. Value comes directly from the `Company Linkedin Url` column in the input CSV. Not written for companies already in Attio.
+**Identity columns (Company Name, Domain, LinkedIn Page, Description)** — written once at pipeline start (before Stage 1) for every CSV row, via an "identity-write" step. Rules:
+- For each CSV row, fill any of the four columns that are currently **empty** in Attio using the CSV value. Never overwrite a non-empty Attio value (preserves human edits).
+- Match the Attio record by `Domain` when the CSV row has a Website, otherwise by `LinkedIn Page` (`upsertCompanyByLinkedInUrl`). Never by Company Name — name-based lookups were removed.
+- `Description` comes from the CSV column `Short Description`.
+- If a CSV row has **neither** a Domain nor a LinkedIn URL, skip the row entirely (no write, not added to the stage processing set).
+- CSV rows with only a LinkedIn URL (no Website) are resolved against the Attio cache via LinkedIn URL lookup to obtain a domain for subsequent stages. If the Attio record doesn't exist yet, the identity-write upserts by `linkedin_page`, but the row will not participate in stages keyed by domain until a future run after Attio assigns a domain.
 
 Stages 7–17 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
 
@@ -398,7 +403,7 @@ After every build or code change:
 - Never commit `.env` — only `.env.example`
 - `ATTIO_API_KEY` and all other secrets only in `.env`, read via `KEYS` in `config.ts`
 - `ATTIO_OBJECT_SLUG` defaults to `ranked_companies` in code; overridable via `.env`
-- Adding a new Attio column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `apis/attio.ts:FIELD_SLUGS`; for a gating-stage column, also add reason builders to `src/rejectionReasons.ts`
+- Adding a new **enrichable** Attio column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `apis/attio.ts:FIELD_SLUGS`; for a gating-stage column, also add reason builders to `src/rejectionReasons.ts`. For a **non-enrichable** identity column (CSV-sourced, like `Description`), only `types.ts` (`InputRow` + `EnrichmentResult`) and `apis/attio.ts:FIELD_SLUGS` are needed — it stays out of `EnrichableColumn` / `ENRICHERS`.
 - Never add business logic decisions (what counts as Digital Native, confidence thresholds, etc.) without asking the user first
 - `toAttioValues` skips empty strings — enrichers must return `''` not `null`/`undefined` to avoid writing blanks to Attio
 - Never call `exa.search` directly — always go through `scheduleExa()`; never call `upsertCompanyByDomain` in a tight loop without the `attioWriteLimit` gate

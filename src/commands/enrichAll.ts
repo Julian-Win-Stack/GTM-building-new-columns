@@ -4,7 +4,7 @@ import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch,
 import { collectJobUrls, theirstackJobsByTechnology } from '../apis/theirstack.js';
 import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi } from '../rateLimit.js';
 import { deriveDomain, normalizeLinkedInUrl } from '../util.js';
-import type { InputRow } from '../types.js';
+import type { EnrichmentResult, InputRow } from '../types.js';
 import type { StageCompany, StageResult } from '../stages/types.js';
 import { runStage } from '../runStage.js';
 import { writeStageColumn } from '../writeStageColumn.js';
@@ -67,7 +67,7 @@ import { fetchRecentIncidents, type FetchOutcome as StatuspageFetchOutcome } fro
 import { parseAiAdoptionMindsetResponse, formatAiAdoptionMindsetForAttio, type AiAdoptionMindsetData } from '../stages/aiAdoptionMindset.js';
 import { parseAiSreMaturityResponse, formatAiSreMaturityForAttio, type AiSreMaturityData } from '../stages/aiSreMaturity.js';
 import { parseIndustryResponse, formatIndustryForAttio, type IndustryData } from '../stages/industry.js';
-import { fetchAllRecords, findCompanyByName, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
+import { fetchAllRecords, upsertCompanyByDomain, upsertCompanyByLinkedInUrl, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
 export type EnrichAllOptions = {
@@ -95,55 +95,73 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const rows = await readInputCsv(csvPath);
   const subset = opts.limit ? rows.slice(0, opts.limit) : rows;
 
+  type CsvIdentity = {
+    name: string;
+    domain: string;
+    linkedinUrl: string;
+    description: string;
+  };
+
+  const csvIdentities: CsvIdentity[] = [];
   const companies: StageCompany[] = [];
   const linkedinByDomain = new Map<string, string>();
   let skippedBadDomain = 0;
 
-  const noDomainRows: InputRow[] = [];
-  for (const row of subset) {
-    const domain = deriveDomain((row as InputRow)['Website']);
-    if (!domain) {
-      noDomainRows.push(row as InputRow);
+  const pendingLinkedInOnly: CsvIdentity[] = [];
+  for (const raw of subset) {
+    const row = raw as InputRow;
+    const domain = deriveDomain(row['Website']);
+    const linkedinUrl = normalizeLinkedInUrl(row['Company Linkedin Url'] ?? '');
+    const name = row['Company Name'] ?? '';
+    const description = row['Short Description'] ?? '';
+
+    if (!domain && !linkedinUrl) {
+      skippedBadDomain++;
+      console.error(`[fail] ${name || '(unknown)'}: no domain and no LinkedIn URL in CSV — skipping`);
       continue;
     }
-    companies.push({ companyName: (row as InputRow)['Company Name'], domain });
-    const li = normalizeLinkedInUrl((row as InputRow)['Company Linkedin Url'] ?? '');
-    if (li) linkedinByDomain.set(domain, li);
-  }
 
-  // For no-domain rows, look up the domain from Attio by company name (set manually)
-  if (noDomainRows.length > 0) {
-    const lookups = await Promise.all(
-      noDomainRows.map(async (row) => {
-        const name = row['Company Name'] || '(unknown)';
-        const attioDomain = await findCompanyByName(name);
-        return { name, attioDomain };
-      })
-    );
-    for (const { name, attioDomain } of lookups) {
-      if (!attioDomain) {
-        skippedBadDomain++;
-        console.error(`[fail] ${name}: no domain in CSV and no domain in Attio — skipping`);
-      } else {
-        console.log(`[enrich-all] ${name}: no CSV domain, using Attio domain (${attioDomain})`);
-        companies.push({ companyName: name, domain: attioDomain });
-        // intentionally not added to linkedinByDomain — domain came from Attio, skip pre-flight write
-      }
+    const identity: CsvIdentity = { name, domain, linkedinUrl, description };
+    if (domain) {
+      csvIdentities.push(identity);
+      companies.push({ companyName: name, domain });
+      if (linkedinUrl) linkedinByDomain.set(domain, linkedinUrl);
+    } else {
+      pendingLinkedInOnly.push(identity);
     }
   }
-
-  console.log(
-    `[enrich-all] csv=${csvPath} rows=${subset.length} csvCompanies=${companies.length} badDomains=${skippedBadDomain} dryRun=${!!opts.dryRun}`
-  );
 
   console.log(`[enrich-all] pre-fetching Attio records…`);
   const attioCache = await fetchAllRecords();
   console.log(`[enrich-all] attio cache loaded (${attioCache.size} records found)`);
 
-  const csvDomainSet = new Set(companies.map((c) => c.domain));
   const reasonSlug = FIELD_SLUGS['Reason for Rejection']!;
   const nameSlug = FIELD_SLUGS['Company Name']!;
   const linkedinSlug = FIELD_SLUGS['LinkedIn Page']!;
+  const domainSlug = FIELD_SLUGS['Domain']!;
+  const descriptionSlug = FIELD_SLUGS['Description']!;
+
+  const byLinkedIn = new Map<string, { domain: string; values: Record<string, string> }>();
+  for (const [domain, values] of attioCache) {
+    const li = values[linkedinSlug];
+    if (li) byLinkedIn.set(li, { domain, values });
+  }
+
+  // Rows with a LinkedIn URL but no domain in CSV — try to resolve domain via LinkedIn URL against Attio cache.
+  for (const identity of pendingLinkedInOnly) {
+    const hit = byLinkedIn.get(identity.linkedinUrl);
+    if (hit) {
+      identity.domain = hit.domain;
+      console.log(`[enrich-all] ${identity.name}: no CSV domain, resolved via LinkedIn URL → ${hit.domain}`);
+      csvIdentities.push(identity);
+      companies.push({ companyName: identity.name, domain: hit.domain });
+      if (!linkedinByDomain.has(hit.domain)) linkedinByDomain.set(hit.domain, identity.linkedinUrl);
+    } else {
+      csvIdentities.push(identity);
+    }
+  }
+
+  const csvDomainSet = new Set(companies.map((c) => c.domain));
   let attioOnlyIncluded = 0;
   let attioOnlyRejected = 0;
   for (const [domain, values] of attioCache) {
@@ -159,26 +177,42 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     if (li && !linkedinByDomain.has(domain)) linkedinByDomain.set(domain, li);
   }
   console.log(
-    `[enrich-all] total companies=${companies.length} (attio-only-included=${attioOnlyIncluded} attio-only-rejected-skipped=${attioOnlyRejected})`
+    `[enrich-all] csv=${csvPath} rows=${subset.length} csvCompanies=${csvIdentities.length} badRows=${skippedBadDomain} totalCompanies=${companies.length} (attio-only-included=${attioOnlyIncluded} attio-only-rejected-skipped=${attioOnlyRejected}) dryRun=${!!opts.dryRun}`
   );
 
-  // Write LinkedIn URL for companies that don't yet have an Attio record
-  const newCompanies = companies.filter((c) => !attioCache.has(c.domain) && linkedinByDomain.has(c.domain));
-  if (newCompanies.length > 0 && !opts.dryRun) {
-    console.log(`[enrich-all] writing LinkedIn URL for ${newCompanies.length} new companies…`);
-    await Promise.all(
-      newCompanies.map((c) =>
-        attioWriteLimit(() =>
-          upsertCompanyByDomain({
-            'Company Name': c.companyName,
-            'Domain': c.domain,
-            'LinkedIn Page': linkedinByDomain.get(c.domain)!,
-          }).catch((err) => {
-            console.error(`[linkedin-preflight] failed for ${c.domain}: ${err instanceof Error ? err.message : String(err)}`);
+  // Identity-write: for each CSV row, fill any of the four identity columns (Name, Domain, LinkedIn Page, Description)
+  // that are currently empty in Attio. Never overwrite non-empty Attio values. Match by domain when available, else by LinkedIn URL.
+  if (!opts.dryRun) {
+    const identityWrites = csvIdentities
+      .map((id) => {
+        const existingValues: Record<string, string> = id.domain
+          ? attioCache.get(id.domain) ?? {}
+          : byLinkedIn.get(id.linkedinUrl)?.values ?? {};
+        const toWrite: Partial<EnrichmentResult> = {};
+        if (id.name && !existingValues[nameSlug]) toWrite['Company Name'] = id.name;
+        if (id.domain && !existingValues[domainSlug]) toWrite['Domain'] = id.domain;
+        if (id.linkedinUrl && !existingValues[linkedinSlug]) toWrite['LinkedIn Page'] = id.linkedinUrl;
+        if (id.description && !existingValues[descriptionSlug]) toWrite['Description'] = id.description;
+        return { id, toWrite };
+      })
+      .filter(({ toWrite }) => Object.keys(toWrite).length > 0);
+
+    if (identityWrites.length > 0) {
+      console.log(`[enrich-all] writing identity columns for ${identityWrites.length} companies…`);
+      await Promise.all(
+        identityWrites.map(({ id, toWrite }) =>
+          attioWriteLimit(() => {
+            const write = id.domain
+              ? upsertCompanyByDomain({ 'Domain': id.domain, ...toWrite })
+              : upsertCompanyByLinkedInUrl({ 'LinkedIn Page': id.linkedinUrl, ...toWrite });
+            return write.catch((err) => {
+              const ref = id.domain || id.linkedinUrl;
+              console.error(`[identity-preflight] failed for ${ref}: ${err instanceof Error ? err.message : String(err)}`);
+            });
           })
         )
-      )
-    );
+      );
+    }
   }
 
   if (opts.dryRun) {

@@ -27,6 +27,7 @@ export async function runPipeline(
     'Company Name': row['Company Name'],
     'Domain': input.domain,
     'LinkedIn Page': row['Company Linkedin Url'] ?? '',
+    'Description': row['Short Description'] ?? '',
     'Digital Native': values['Digital Native'] ?? '',
     'Cloud Tool': values['Cloud Tool'] ?? '',
     'Observability Tool': values['Observability Tool'] ?? '',

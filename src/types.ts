@@ -2,6 +2,7 @@ export type InputRow = {
   'Company Name': string;
   'Website': string;
   'Company Linkedin Url': string;
+  'Short Description': string;
 };
 
 export type EnrichableColumn =
@@ -28,6 +29,7 @@ export type EnrichmentResult = {
   'Company Name': string;
   'Domain': string;
   'LinkedIn Page': string;
+  'Description': string;
   'Digital Native': string;
   'Cloud Tool': string;
   'Observability Tool': string;

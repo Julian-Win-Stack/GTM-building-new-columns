@@ -46,6 +46,7 @@ describe('runPipeline', () => {
       'Company Name': 'Acme',
       Website: 'https://acme.com',
       'Company Linkedin Url': 'https://linkedin.com/company/acme',
+      'Short Description': '',
     });
     for (const col of columnListMock) {
       expect(enrichersMock[col]).toHaveBeenCalledTimes(1);
@@ -58,9 +59,29 @@ describe('runPipeline', () => {
       'Company Name': 'Acme',
       Website: 'https://WWW.acme.com/about',
       'Company Linkedin Url': '',
+      'Short Description': '',
     });
     expect(out['Company Name']).toBe('Acme');
     expect(out.Domain).toBe('acme.com');
+  });
+
+  it('passes Short Description through to the Description column', async () => {
+    const out = await runPipeline({
+      'Company Name': 'Acme',
+      Website: 'https://acme.com',
+      'Company Linkedin Url': '',
+      'Short Description': 'A widget company',
+    });
+    expect(out['Description']).toBe('A widget company');
+  });
+
+  it('defaults Description to empty string when Short Description is absent', async () => {
+    const out = await runPipeline({
+      'Company Name': 'Acme',
+      Website: 'https://acme.com',
+      'Company Linkedin Url': '',
+    } as unknown as Parameters<typeof runPipeline>[0]);
+    expect(out['Description']).toBe('');
   });
 
   it('passes a fully-populated EnricherInput to each enricher', async () => {
@@ -68,6 +89,7 @@ describe('runPipeline', () => {
       'Company Name': 'Acme',
       Website: 'https://acme.com',
       'Company Linkedin Url': 'https://linkedin.com/company/acme',
+      'Short Description': '',
     });
     const passed = enrichersMock['Digital Native'].mock.calls[0]![0];
     expect(passed).toEqual({
@@ -84,6 +106,7 @@ describe('runPipeline', () => {
         'Company Name': 'Acme',
         Website: 'acme.com',
         'Company Linkedin Url': '',
+        'Short Description': '',
       },
       ['Digital Native', 'Cloud Tool']
     );
@@ -99,6 +122,7 @@ describe('runPipeline', () => {
         'Company Name': 'Acme',
         Website: 'acme.com',
         'Company Linkedin Url': '',
+        'Short Description': '',
       },
       ['Digital Native']
     );
@@ -112,7 +136,7 @@ describe('runSingleEnricher', () => {
   it('invokes exactly the requested enricher and returns its value', async () => {
     enrichersMock['Cloud Tool'].mockResolvedValue('AWS');
     const out = await runSingleEnricher(
-      { 'Company Name': 'Acme', Website: 'acme.com', 'Company Linkedin Url': '' },
+      { 'Company Name': 'Acme', Website: 'acme.com', 'Company Linkedin Url': '', 'Short Description': '' },
       'Cloud Tool'
     );
     expect(out).toBe('AWS');
@@ -128,6 +152,7 @@ describe('runSingleEnricher', () => {
         'Company Name': 'Acme',
         Website: 'https://www.acme.com/',
         'Company Linkedin Url': 'li',
+        'Short Description': '',
       },
       'Digital Native'
     );

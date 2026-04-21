@@ -14,7 +14,7 @@ vi.mock('axios', () => ({
   },
 }));
 
-const { findCompanyByDomain, findCompanyByName, createCompany, updateCompany, upsertCompanyByDomain, fetchAllRecords } =
+const { findCompanyByDomain, createCompany, updateCompany, upsertCompanyByDomain, upsertCompanyByLinkedInUrl, fetchAllRecords } =
   await import('./attio.js');
 
 beforeEach(() => {
@@ -65,32 +65,6 @@ describe('findCompanyByDomain', () => {
     });
     const out = await findCompanyByDomain('acme.com');
     expect(out?.values).toEqual({});
-  });
-});
-
-describe('findCompanyByName', () => {
-  it('queries by company_name and returns the domain on match', async () => {
-    httpMock.post.mockResolvedValue({
-      data: { data: [{ id: { record_id: 'rec_1' }, values: { domain: [{ domain_name: 'acme.com' }] } }] },
-    });
-    const domain = await findCompanyByName('Acme');
-    expect(httpMock.post).toHaveBeenCalledWith(
-      expect.stringMatching(/\/records\/query$/),
-      { filter: { company_name: { $eq: 'Acme' } }, limit: 1 }
-    );
-    expect(domain).toBe('acme.com');
-  });
-
-  it('returns null when no records match', async () => {
-    httpMock.post.mockResolvedValue({ data: { data: [] } });
-    expect(await findCompanyByName('Unknown Co')).toBeNull();
-  });
-
-  it('returns null when the matched record has no domain', async () => {
-    httpMock.post.mockResolvedValue({
-      data: { data: [{ id: { record_id: 'rec_1' }, values: { company_name: [{ value: 'Acme' }] } }] },
-    });
-    expect(await findCompanyByName('Acme')).toBeNull();
   });
 });
 
@@ -269,11 +243,59 @@ describe('upsertCompanyByDomain', () => {
     });
   });
 
+  it('maps Description to the description slug', async () => {
+    httpMock.put.mockResolvedValue({ data: { data: { id: 'rec_1', values: {} } } });
+    await upsertCompanyByDomain({ Domain: 'acme.com', Description: 'A widget company' });
+    const [, body] = httpMock.put.mock.calls[0]!;
+    expect(body.data.values).toEqual({ domain: 'acme.com', description: 'A widget company' });
+  });
+
   it('returns the upserted record', async () => {
     httpMock.put.mockResolvedValue({
       data: { data: { id: { record_id: 'rec_9' }, values: { domain: 'acme.com' } } },
     });
     const out = await upsertCompanyByDomain({ Domain: 'acme.com' });
     expect(out).toEqual({ id: 'rec_9', values: { domain: 'acme.com' } });
+  });
+});
+
+describe('upsertCompanyByLinkedInUrl', () => {
+  it('PUTs with matching_attribute=linkedin_page query param', async () => {
+    httpMock.put.mockResolvedValue({ data: { data: { id: 'rec_1', values: {} } } });
+    await upsertCompanyByLinkedInUrl({
+      'Company Name': 'Acme',
+      'LinkedIn Page': 'https://linkedin.com/company/acme',
+    });
+    const [, , config] = httpMock.put.mock.calls[0]!;
+    expect(config).toEqual({ params: { matching_attribute: 'linkedin_page' } });
+  });
+
+  it('sends the values body with mapped slugs', async () => {
+    httpMock.put.mockResolvedValue({ data: { data: { id: 'rec_1', values: {} } } });
+    await upsertCompanyByLinkedInUrl({
+      'Company Name': 'Acme',
+      'LinkedIn Page': 'https://linkedin.com/company/acme',
+      Description: 'Widgets',
+    });
+    const [, body] = httpMock.put.mock.calls[0]!;
+    expect(body).toEqual({
+      data: {
+        values: {
+          company_name: 'Acme',
+          linkedin_page: 'https://linkedin.com/company/acme',
+          description: 'Widgets',
+        },
+      },
+    });
+  });
+
+  it('returns the upserted record', async () => {
+    httpMock.put.mockResolvedValue({
+      data: { data: { id: { record_id: 'rec_42' }, values: {} } },
+    });
+    const out = await upsertCompanyByLinkedInUrl({
+      'LinkedIn Page': 'https://linkedin.com/company/acme',
+    });
+    expect(out.id).toBe('rec_42');
   });
 });
