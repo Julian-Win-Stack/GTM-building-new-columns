@@ -102,10 +102,53 @@ describe('parseCustomerComplaintsResponse', () => {
     expect(results[0]!.data.full_outage_urls).toEqual([]);
   });
 
-  it('passes company name into the prompt', async () => {
+  it('deduplicates tweets by URL before sending to OpenAI', async () => {
+    vi.mocked(judge).mockResolvedValue({ categories: ['full_outage', 'partial_outage'] });
+    const tweets: TweetItem[] = [
+      { text: 'down', url: 'https://x.com/i/status/1' },
+      { text: 'still down', url: 'https://x.com/i/status/1' },
+      { text: 'partial', url: 'https://x.com/i/status/2' },
+    ];
+    const results = await parseCustomerComplaintsResponse(tweets, [company]);
+    // OpenAI received 2 tweets (duplicate removed), classified as full_outage + partial_outage
+    expect(results[0]!.data.full_outage).toBe(1);
+    expect(results[0]!.data.partial_outage).toBe(1);
+    const call = vi.mocked(judge).mock.calls[0]![0];
+    expect(call.user).toContain('2 tweets');
+  });
+
+  it('silently drops not_about_company tweets from all counts', async () => {
+    vi.mocked(judge).mockResolvedValue({
+      categories: ['not_about_company', 'full_outage', 'not_about_company'],
+    });
+    const tweets = makeTweets(['unrelated', 'down', 'also unrelated']);
+    const results = await parseCustomerComplaintsResponse(tweets, [company]);
+    expect(results[0]!.data.full_outage).toBe(1);
+    expect(results[0]!.data.partial_outage).toBe(0);
+    expect(results[0]!.data.performance_degradation).toBe(0);
+    expect(results[0]!.data.unclear).toBe(0);
+    expect(results[0]!.data.full_outage_urls).toEqual(['https://x.com/i/status/2']);
+  });
+
+  it('passes company name and domain into the prompt', async () => {
     vi.mocked(judge).mockResolvedValue({ categories: ['unclear'] });
     await parseCustomerComplaintsResponse(makeTweets(['some tweet']), [company]);
     const call = vi.mocked(judge).mock.calls[0]![0];
     expect(call.user).toContain('Acme');
+    expect(call.user).toContain('acme.com');
+  });
+
+  it('includes company context in the prompt when provided', async () => {
+    vi.mocked(judge).mockResolvedValue({ categories: ['unclear'] });
+    await parseCustomerComplaintsResponse(makeTweets(['some tweet']), [company], 'Acme is a B2B SaaS platform');
+    const call = vi.mocked(judge).mock.calls[0]![0];
+    expect(call.user).toContain('Acme is a B2B SaaS platform');
+  });
+
+  it('omits context line from prompt when context is empty', async () => {
+    vi.mocked(judge).mockResolvedValue({ categories: ['unclear'] });
+    await parseCustomerComplaintsResponse(makeTweets(['some tweet']), [company], '');
+    const call = vi.mocked(judge).mock.calls[0]![0];
+    expect(call.user).not.toContain('Company context:');
   });
 });

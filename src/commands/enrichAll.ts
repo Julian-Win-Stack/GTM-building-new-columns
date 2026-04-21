@@ -660,6 +660,13 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   console.log(`[customerComplaintsOnX] todo=${stage13Todo.length} skipped=${stage13Done.length}`);
 
   const companyNameByDomain13 = new Map(stage13Todo.map((c) => [c.domain, c.companyName]));
+  const companyContextByDomain13 = new Map<string, string>(
+    stage13Todo.map((c) => {
+      const values = attioCache.get(c.domain) ?? {};
+      const ctx = values[descriptionSlug] || values[stage2Slug] || '';
+      return [c.domain, ctx];
+    })
+  );
 
   await runStage<TweetItem[], CustomerComplaintsData>({
     name: 'customerComplaintsOnX',
@@ -671,7 +678,10 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       const name = companyNameByDomain13.get(domain) ?? '';
       return fetchComplaintTweets(domain, name);
     },
-    parse: (raw, batch) => parseCustomerComplaintsResponse(raw, batch),
+    parse: (raw, batch) => {
+      const context = companyContextByDomain13.get(batch[0]!.domain) ?? '';
+      return parseCustomerComplaintsResponse(raw, batch, context);
+    },
     afterBatch: async (batchResults) => {
       await writeStageColumn('Customer complains on X', batchResults, formatCustomerComplaintsForAttio);
       for (const r of batchResults) {

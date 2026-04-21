@@ -14,10 +14,10 @@ export type CustomerComplaintsData = {
   unclear: number;
 };
 
-type TweetCategory = 'full_outage' | 'partial_outage' | 'performance_degradation' | 'unclear';
+type TweetCategory = 'full_outage' | 'partial_outage' | 'performance_degradation' | 'unclear' | 'not_about_company';
 
 const CLASSIFIER_SYSTEM =
-  'You are a tweet classifier. Classify each tweet into exactly one of: full_outage, partial_outage, performance_degradation, unclear.';
+  'You are a tweet classifier. Classify each tweet into exactly one of: full_outage, partial_outage, performance_degradation, unclear, not_about_company.';
 
 const CLASSIFIER_SCHEMA = {
   name: 'tweet_classification',
@@ -29,7 +29,7 @@ const CLASSIFIER_SCHEMA = {
         type: 'array' as const,
         items: {
           type: 'string' as const,
-          enum: ['full_outage', 'partial_outage', 'performance_degradation', 'unclear'],
+          enum: ['full_outage', 'partial_outage', 'performance_degradation', 'unclear', 'not_about_company'],
         },
       },
     },
@@ -50,7 +50,8 @@ const ZERO_DATA: CustomerComplaintsData = {
 
 export async function parseCustomerComplaintsResponse(
   tweets: TweetItem[],
-  companies: StageCompany[]
+  companies: StageCompany[],
+  companyContext = ''
 ): Promise<StageResult<CustomerComplaintsData>[]> {
   const company = companies[0];
   if (!company) return [];
@@ -60,16 +61,26 @@ export async function parseCustomerComplaintsResponse(
     return [{ company, data: { ...ZERO_DATA } }];
   }
 
-  console.log(`[customerComplaintsOnX] ${company.domain}: classifying ${tweets.length} tweets via OpenAI`);
+  const seen = new Set<string>();
+  const dedupedTweets = tweets.filter((t) => {
+    if (!t.url) return true;
+    if (seen.has(t.url)) return false;
+    seen.add(t.url);
+    return true;
+  });
 
-  const tweetList = tweets.map((t, i) => `${i + 1}. "${t.text}"`).join('\n');
+  console.log(`[customerComplaintsOnX] ${company.domain}: classifying ${dedupedTweets.length} tweets via OpenAI (${tweets.length - dedupedTweets.length} duplicate URLs removed)`);
+
+  const tweetList = dedupedTweets.map((t, i) => `${i + 1}. "${t.text}"`).join('\n');
+  const contextLine = companyContext ? `\nCompany context: ${companyContext}\n` : '';
   const userPrompt =
-    `Here are ${tweets.length} tweets about ${company.companyName} being down or having issues.\n\n` +
+    `Here are ${dedupedTweets.length} tweets that may or may not be about ${company.companyName} (${company.domain}) having reliability issues.${contextLine}\n` +
     `For each tweet, classify it into ONE of:\n` +
-    `- full_outage: service completely unreachable\n` +
-    `- partial_outage: some features broken, not everything\n` +
-    `- performance_degradation: slow, timeouts, intermittent failures\n` +
-    `- unclear: cannot determine\n\n` +
+    `- full_outage: tweet is about ${company.companyName}'s service being completely unreachable\n` +
+    `- partial_outage: tweet is about ${company.companyName}'s service having some features broken, not everything\n` +
+    `- performance_degradation: tweet is about ${company.companyName}'s service being slow, with timeouts, or intermittent failures\n` +
+    `- not_about_company: tweet is not about ${company.companyName} or is not about a reliability issue with their platform\n` +
+    `- unclear: tweet seems to be about ${company.companyName} but cannot determine severity\n\n` +
     `Return a JSON object with a "categories" array containing one label per tweet, in the same order as the input.\n\n` +
     `Tweets:\n${tweetList}`;
 
@@ -83,10 +94,12 @@ export async function parseCustomerComplaintsResponse(
 
   const data: CustomerComplaintsData = { ...ZERO_DATA, full_outage_urls: [], partial_outage_urls: [], performance_degradation_urls: [] };
 
-  for (let i = 0; i < tweets.length; i++) {
+  for (let i = 0; i < dedupedTweets.length; i++) {
     const category = (result.categories[i] ?? 'unclear') as TweetCategory;
-    const url = tweets[i]!.url;
-    if (category === 'full_outage') {
+    const url = dedupedTweets[i]!.url;
+    if (category === 'not_about_company') {
+      // silently dropped — tweet is not about this company's platform
+    } else if (category === 'full_outage') {
       data.full_outage++;
       if (url) data.full_outage_urls.push(url);
     } else if (category === 'partial_outage') {
