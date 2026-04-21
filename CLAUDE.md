@@ -69,6 +69,7 @@ src/
     industry.ts         — Stage 17: parser (structured JSON, enum-enforced 23-category list), no gate, Attio formatter (two-line `industry: X\nreason: Y`); off-enum values yield error (cell left blank for retry)
     companyContextScore.ts — Context Score State (Stage 18): OpenAI scorer (0–5, 0.5 increments) using all prior Attio cells; hash-gated re-run via `change_detection_column_for_developer`; exports computeInputHash, scoreCompanyContext, formatContextScoreForAttio
     toolingMatchScore.ts   — Tooling Match Score (Stage 19): OpenAI scorer over 4 tooling cells (Communication Tool, Competitor Tooling, Observability Tool, Cloud Tool); hash-gated re-run via `tooling_match_change_detection_for_developer` (hash covers only those 4 inputs); exports scoreToolingMatch, formatToolingMatchScoreForAttio, parseToolingMatchResponse, TOOLING_MATCH_INPUT_COLUMNS
+    intentSignalScore.ts   — Intent Signal Score (Stage 20): OpenAI scorer over 8 buying-signal cells (Tier 1: Customer complains on X, Engineer Hiring, SRE Hiring, AI SRE maturity; Tier 2: Recent incidents, AI adoption mindset; Tier 3: Funding Growth, Revenue Growth); hash-gated re-run via `intent_signal_change_detection_for_developer`; exports scoreIntentSignal, formatIntentSignalScoreForAttio, parseIntentSignalResponse, INTENT_SIGNAL_INPUT_COLUMNS
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
@@ -140,6 +141,7 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 17 | Industry | Exa | no gate — data collection only |
 | 18 | Company Context Score | Azure OpenAI (`gpt-5.4-pro`) | no gate — synthesis over prior Attio cells |
 | 19 | Tooling Match Score | Azure OpenAI (`gpt-5.4-pro`) | no gate — scores 4 tooling cells; runs at same level as Stage 18 |
+| 20 | Intent Signal Score | Azure OpenAI (`gpt-5.4-pro`) | no gate — synthesis over 8 buying-signal cells; runs at same level as Stages 18 and 19 |
 
 Stages 2–6 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing. Immediately after each gate, rejected companies receive a `Reason for Rejection` value written to Attio (crash-safe, via `writeRejectionReasons` in `src/writeRejectionReason.ts`). The reason format is `"<Stage name>: <specific reason>"` (e.g. `"Cloud Tool: uses Azure (not AWS/GCP)"`). Errored companies (fetch/parse failure) are not written — they will be retried on the next run.
 
@@ -394,6 +396,16 @@ Stage 19 uses independent hash-gating via `tooling_match_change_detection_for_de
 
 Stage 19 is per-company (batchSize: 1). Uses Azure OpenAI (`gpt-5.4-pro` via `AZURE_OPENAI_DEPLOYMENT_PRO`, falls back to `AZURE_OPENAI_DEPLOYMENT`). Operates on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty. `computeInputHash` (exported from `companyContextScore.ts`) is reused.
 
+**Intent Signal Score** — two-section string:
+```
+Intent Signal Score: <score>
+
+Reasoning:
+<2–4 sentences covering customer complaints, hiring, SRE maturity, incidents, and AI adoption>
+```
+Score is one of: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5. If any signal data is missing, the reasoning explicitly says "Not publicly confirmed".
+Stage 20 is per-company (batchSize: 1). Hash covers only the 8 intent-signal inputs via `intent_signal_change_detection_for_developer` — independent of Stages 18 and 19. Uses Azure OpenAI (`gpt-5.4-pro`). Same eligibility precondition as Stages 18/19 (all 17 prior enrichable columns non-empty).
+
 **Identity columns (Company Name, Domain, LinkedIn Page, Description)** — written once at pipeline start (before Stage 1) for every CSV row, via an "identity-write" step. Rules:
 - For each CSV row, fill any of the four columns that are currently **empty** in Attio using the CSV value. Never overwrite a non-empty Attio value (preserves human edits).
 - Match the Attio record by `Domain` when the CSV row has a Website, otherwise by `LinkedIn Page` (`upsertCompanyByLinkedInUrl`). Never by Company Name — name-based lookups were removed.
@@ -401,7 +413,7 @@ Stage 19 is per-company (batchSize: 1). Uses Azure OpenAI (`gpt-5.4-pro` via `AZ
 - If a CSV row has **neither** a Domain nor a LinkedIn URL, skip the row entirely (no write, not added to the stage processing set).
 - CSV rows with only a LinkedIn URL (no Website) are resolved against the Attio cache via LinkedIn URL lookup to obtain a domain for subsequent stages. If the Attio record doesn't exist yet, the identity-write upserts by `linkedin_page`, but the row will not participate in stages keyed by domain until a future run after Attio assigns a domain.
 
-Stages 7–17 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged. Stages 18 and 19 both operate on `survivorsAfterStage6` with the same precondition (all 17 prior enrichable columns must be non-empty) but are independent of each other — neither requires the other to have run first.
+Stages 7–17 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged. Stages 18, 19, and 20 all operate on `survivorsAfterStage6` with the same precondition (all 17 prior enrichable columns must be non-empty) but are independent of each other — none requires the others to have run first.
 
 Stages 11 and 12 share a single `runStage` invocation (one Apify call per company) whose `afterBatch` writes both Engineer Hiring and SRE Hiring columns. Cache-skip requires both slugs to be non-empty; either blank triggers a fresh call.
 
@@ -418,7 +430,7 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 - **Apify (fantastic-jobs/career-site-job-listing-feed)**: Engineer Hiring, SRE Hiring (single call per company feeds both columns)
 - **twitterapi.io + Azure OpenAI**: Customer complains on X (paginated tweet fetch → OpenAI 4-bucket classifier)
 - **Statuspage v2 (no auth)**: Recent incidents ( Official ) — probes `status.{domain}` then `{slug}.statuspage.io`, paginates 90-day window, no OpenAI
-- **Azure OpenAI (gpt-5.4-pro)**: Company Context Score (Stage 18) — feeds all 17 prior Attio cell values into a single structured-JSON judge() call; hash-gated re-run; Tooling Match Score (Stage 19) — scores 4 tooling cells (Communication Tool, Competitor Tooling, Observability Tool, Cloud Tool); hash covers only those 4 inputs via `tooling_match_change_detection_for_developer`
+- **Azure OpenAI (gpt-5.4-pro)**: Company Context Score (Stage 18) — feeds all 17 prior Attio cell values into a single structured-JSON judge() call; hash-gated re-run; Tooling Match Score (Stage 19) — scores 4 tooling cells (Communication Tool, Competitor Tooling, Observability Tool, Cloud Tool); hash covers only those 4 inputs via `tooling_match_change_detection_for_developer`; Intent Signal Score (Stage 20) — scores 8 buying-signal cells across 3 tiers; hash covers only those 8 inputs via `intent_signal_change_detection_for_developer`
 
 ## Commands
 ```
@@ -474,7 +486,7 @@ After every build or code change:
 - Never commit `.env` — only `.env.example`
 - `ATTIO_API_KEY` and all other secrets only in `.env`, read via `KEYS` in `config.ts`
 - `ATTIO_OBJECT_SLUG` defaults to `ranked_companies` in code; overridable via `.env`
-- Adding a new **enrichable** Attio column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `apis/attio.ts:FIELD_SLUGS`; for a gating-stage column, also add reason builders to `src/rejectionReasons.ts`. For a **non-enrichable** identity column (CSV-sourced, like `Description`), only `types.ts` (`InputRow` + `EnrichmentResult`) and `apis/attio.ts:FIELD_SLUGS` are needed — it stays out of `EnrichableColumn` / `ENRICHERS`. Also update `pipeline.ts:EnrichmentResult` literal. Note: adding any new upstream enrichable column automatically changes the hash for all companies and triggers a Stage 18 re-score on the next run — this is intentional (new signal → refreshed score).
+- Adding a new **enrichable** Attio column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `apis/attio.ts:FIELD_SLUGS`; for a gating-stage column, also add reason builders to `src/rejectionReasons.ts`. For a **non-enrichable** identity column (CSV-sourced, like `Description`), only `types.ts` (`InputRow` + `EnrichmentResult`) and `apis/attio.ts:FIELD_SLUGS` are needed — it stays out of `EnrichableColumn` / `ENRICHERS`. Also update `pipeline.ts:EnrichmentResult` literal. Note: adding any new upstream enrichable column automatically changes the hash for all companies and triggers a Stage 18 re-score on the next run — this is intentional (new signal → refreshed score). When adding a new score column (Stages 18/19/20 style), also update the three `.filter()` exclusion clauses in `enrichAll.ts` that exclude score columns from the eligibility hash — all three score columns must be excluded from each other's prior-column checks to avoid circular dependency.
 - Never add business logic decisions (what counts as Digital Native, confidence thresholds, etc.) without asking the user first
 - `toAttioValues` skips empty strings — enrichers must return `''` not `null`/`undefined` to avoid writing blanks to Attio
 - Never call `exa.search` directly — always go through `scheduleExa()`; never call `upsertCompanyByDomain` in a tight loop without the `attioWriteLimit` gate

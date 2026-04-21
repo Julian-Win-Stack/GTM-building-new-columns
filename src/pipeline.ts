@@ -49,6 +49,8 @@ export async function runPipeline(
     'Change Detection Column for Developer': '',
     'Tooling Match Score': values['Tooling Match Score'] ?? '',
     'Tooling Match Change Detection for Developer': '',
+    'Intent Signal Score': values['Intent Signal Score'] ?? '',
+    'Intent Signal Change Detection for Developer': '',
     'Reason for Rejection': values['Reason for Rejection'] ?? '',
   };
   return result;

@@ -68,6 +68,7 @@ import { parseAiSreMaturityResponse, formatAiSreMaturityForAttio, type AiSreMatu
 import { parseIndustryResponse, formatIndustryForAttio, type IndustryData } from '../stages/industry.js';
 import { computeInputHash, scoreCompanyContext, formatContextScoreForAttio, type ContextScoreData } from '../stages/companyContextScore.js';
 import { scoreToolingMatch, formatToolingMatchScoreForAttio, TOOLING_MATCH_INPUT_COLUMNS, type ToolingMatchScoreData } from '../stages/toolingMatchScore.js';
+import { scoreIntentSignal, formatIntentSignalScoreForAttio, INTENT_SIGNAL_INPUT_COLUMNS, type IntentSignalScoreData } from '../stages/intentSignalScore.js';
 import { fetchAllRecords, upsertCompanyByDomain, upsertCompanyByLinkedInUrl, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
@@ -796,7 +797,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const stage18Slug = FIELD_SLUGS['Company Context Score']!;
   const hashSlug = FIELD_SLUGS['Change Detection Column for Developer']!;
   const enrichableSlugsForHash = (ENRICHABLE_COLUMNS as readonly string[])
-    .filter((c) => c !== 'Company Context Score' && c !== 'Tooling Match Score')
+    .filter((c) => c !== 'Company Context Score' && c !== 'Tooling Match Score' && c !== 'Intent Signal Score')
     .map((c) => FIELD_SLUGS[c]!);
 
   const stage18Eligible = survivorsAfterStage6.filter((c) => {
@@ -848,7 +849,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const stage19HashSlug = FIELD_SLUGS['Tooling Match Change Detection for Developer']!;
   const toolingInputSlugs = (TOOLING_MATCH_INPUT_COLUMNS as readonly string[]).map((c) => FIELD_SLUGS[c]!);
   const priorSlugsForStage19 = (ENRICHABLE_COLUMNS as readonly string[])
-    .filter((c) => c !== 'Company Context Score' && c !== 'Tooling Match Score')
+    .filter((c) => c !== 'Company Context Score' && c !== 'Tooling Match Score' && c !== 'Intent Signal Score')
     .map((c) => FIELD_SLUGS[c]!);
 
   const stage19Eligible = survivorsAfterStage6.filter((c) => {
@@ -890,6 +891,58 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
           })
         );
         attioCache.set(r.company.domain, { ...values, [stage19Slug]: cell, [stage19HashSlug]: hash });
+      }
+    },
+  });
+
+  // Stage 20 — Intent Signal Score (OpenAI scoring of 8 intent-signal cells, hash-gated re-run)
+  // Runs at the same level as Stages 18 and 19 — independent of both. Hash covers only the 8 input cells.
+  const stage20Slug = FIELD_SLUGS['Intent Signal Score']!;
+  const stage20HashSlug = FIELD_SLUGS['Intent Signal Change Detection for Developer']!;
+  const intentInputSlugs = (INTENT_SIGNAL_INPUT_COLUMNS as readonly string[]).map((c) => FIELD_SLUGS[c]!);
+  const priorSlugsForStage20 = (ENRICHABLE_COLUMNS as readonly string[])
+    .filter((c) => c !== 'Company Context Score' && c !== 'Tooling Match Score' && c !== 'Intent Signal Score')
+    .map((c) => FIELD_SLUGS[c]!);
+
+  const stage20Eligible = survivorsAfterStage6.filter((c) => {
+    const values = attioCache.get(c.domain) ?? {};
+    return priorSlugsForStage20.every((slug) => !!values[slug]);
+  });
+
+  const stage20Todo = stage20Eligible.filter((c) => {
+    const values = attioCache.get(c.domain) ?? {};
+    const currentHash = computeInputHash(values, intentInputSlugs);
+    return values[stage20HashSlug] !== currentHash;
+  });
+
+  console.log(`[intentSignalScore] eligible=${stage20Eligible.length} todo=${stage20Todo.length} hash-skipped=${stage20Eligible.length - stage20Todo.length}`);
+
+  await runStage<Record<string, string>, IntentSignalScoreData>({
+    name: 'intentSignalScore',
+    companies: stage20Todo,
+    batchSize: 1,
+    retry: { tries: 3, baseMs: 1000 },
+    call: (domains) => Promise.resolve(attioCache.get(domains[0]!) ?? {}),
+    parse: async (values, batch) => {
+      const company = batch[0]!;
+      const data = await scoreIntentSignal(company, values);
+      return [{ company, data }];
+    },
+    afterBatch: async (batchResults) => {
+      for (const r of batchResults) {
+        if (r.error !== undefined) continue;
+        const values = attioCache.get(r.company.domain) ?? {};
+        const hash = computeInputHash(values, intentInputSlugs);
+        const cell = formatIntentSignalScoreForAttio(r.data);
+        await attioWriteLimit(() =>
+          upsertCompanyByDomain({
+            'Company Name': r.company.companyName,
+            'Domain': r.company.domain,
+            'Intent Signal Score': cell,
+            'Intent Signal Change Detection for Developer': hash,
+          })
+        );
+        attioCache.set(r.company.domain, { ...values, [stage20Slug]: cell, [stage20HashSlug]: hash });
       }
     },
   });
