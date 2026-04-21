@@ -4,6 +4,7 @@ import {
   competitorToolGate,
   formatCompetitorToolForAttio,
   competitorToolCacheGate,
+  extractMatchedToolsFromCached,
 } from './competitorTool.js';
 
 describe('matchCompetitorTools', () => {
@@ -15,15 +16,8 @@ describe('matchCompetitorTools', () => {
 
   it('is case-insensitive and trims whitespace', () => {
     expect(matchCompetitorTools('  netflix  ')).toEqual(['Incident.io']);
-    expect(matchCompetitorTools('ZOOM')).toEqual(['PagerDuty']);
+    expect(matchCompetitorTools('webflow')).toEqual(['Rootly']);
     expect(matchCompetitorTools('DoorDash')).toEqual(['Resolve.ai']);
-  });
-
-  it('returns multiple tools when a company appears in several', () => {
-    expect(matchCompetitorTools('Cisco')).toEqual(['Splunk On-Call', 'BigPanda']);
-    expect(matchCompetitorTools('Yahoo')).toEqual(['Opsgenie', 'Moogsoft']);
-    expect(matchCompetitorTools('American Airlines')).toEqual(['xMatters', 'Moogsoft']);
-    expect(matchCompetitorTools('Intuit')).toEqual(['Splunk On-Call', 'Moogsoft']);
   });
 
   it('returns empty for unknown companies', () => {
@@ -51,14 +45,47 @@ describe('formatCompetitorToolForAttio', () => {
     );
   });
 
-  it('formats single match as tool name', () => {
-    expect(formatCompetitorToolForAttio({ matchedTools: ['Rootly'] })).toBe('Rootly');
+  it('formats single match with evidence line', () => {
+    expect(formatCompetitorToolForAttio({ matchedTools: ['Rootly'] })).toBe(
+      "Rootly\n\nEvidence: (Rootly's customer page)"
+    );
   });
 
-  it('formats multiple matches joined by comma', () => {
+  it('formats multiple matches with one evidence line per tool', () => {
     expect(
-      formatCompetitorToolForAttio({ matchedTools: ['Splunk On-Call', 'BigPanda'] })
-    ).toBe('Splunk On-Call, BigPanda');
+      formatCompetitorToolForAttio({ matchedTools: ['Resolve.ai', 'Rootly'] })
+    ).toBe(
+      "Resolve.ai, Rootly\n\nEvidence: (Resolve.ai's customer page)\nEvidence: (Rootly's customer page)"
+    );
+  });
+});
+
+describe('extractMatchedToolsFromCached', () => {
+  it('returns empty for no-match sentinel', () => {
+    expect(extractMatchedToolsFromCached('Not using any competitor tools')).toEqual([]);
+  });
+
+  it('extracts single tool from new multi-line format', () => {
+    expect(
+      extractMatchedToolsFromCached("Rootly\n\nEvidence: (Rootly's customer page)")
+    ).toEqual(['Rootly']);
+  });
+
+  it('extracts multiple tools from new multi-line format', () => {
+    expect(
+      extractMatchedToolsFromCached(
+        "Resolve.ai, Rootly\n\nEvidence: (Resolve.ai's customer page)\nEvidence: (Rootly's customer page)"
+      )
+    ).toEqual(['Resolve.ai', 'Rootly']);
+  });
+
+  it('is backward-compatible with legacy single-line format', () => {
+    expect(extractMatchedToolsFromCached('Rootly')).toEqual(['Rootly']);
+    expect(extractMatchedToolsFromCached('Resolve.ai, Rootly')).toEqual(['Resolve.ai', 'Rootly']);
+  });
+
+  it('returns empty for empty input', () => {
+    expect(extractMatchedToolsFromCached('')).toEqual([]);
   });
 });
 
@@ -74,7 +101,7 @@ describe('competitorToolCacheGate', () => {
   it('rejects when a competitor tool is recorded', () => {
     expect(competitorToolCacheGate('Resolve.ai')).toBe(false);
     expect(competitorToolCacheGate('Rootly')).toBe(false);
-    expect(competitorToolCacheGate('Splunk On-Call, BigPanda')).toBe(false);
+    expect(competitorToolCacheGate('Incident.io')).toBe(false);
   });
 
   it('rejects empty cached value', () => {

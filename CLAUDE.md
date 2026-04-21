@@ -116,7 +116,7 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 
 | # | Column | API | Gate (pass condition) |
 |---|---|---|---|
-| 1 | Competitor Tooling | *local match* | company name NOT in any competitor-tool customer list (Resolve.ai, Rootly, Incident.io, FireHydrant, PagerDuty, Opsgenie, xMatters, Splunk On-Call, BigPanda, Moogsoft) |
+| 1 | Competitor Tooling | *local match* | company name NOT in any competitor-tool customer list (Resolve.ai, Rootly, Incident.io, Traversal, TierZero, RunLLM, Neubird, Wildmoose) |
 | 2 | Digital Native | Exa | category is NOT `NOT Digital-native` |
 | 3 | Number of Users | Exa | conditional: for `Digital-native B2B` only — `user_count_bucket` must be `100K+`; non-B2B, fetch errors, and `unknown` bucket pass unconditionally (unknown = flag for human review, not rejected) |
 | 4 | Observability Tool | Exa | no tool evidence OR at least one of: Datadog, Grafana, Prometheus |
@@ -191,13 +191,18 @@ Both: <source_url>
 Stage 5 is batch-of-2 (like Digital Native). Exa returns the actual vendor name from source evidence; `tool` is a free-form string (no enum constraint). Gate passes AWS / GCP / Both / no-evidence; rejects any other cloud (Azure, IBM Cloud, etc.).
 If no evidence found: literal `No evidence found`.
 
-**Competitor Tooling** — comma-joined competitor tool names when the CSV company matches a known customer list, or a literal string otherwise:
+**Competitor Tooling** — comma-joined competitor tool names on the first line, blank line, then one `Evidence: (<Tool>'s customer page)` line per matched tool:
 ```
 Rootly
+
+Evidence: (Rootly's customer page)
 ```
 or (multiple matches):
 ```
-Splunk On-Call, BigPanda
+Resolve.ai, Rootly
+
+Evidence: (Resolve.ai's customer page)
+Evidence: (Rootly's customer page)
 ```
 or (no match, passed):
 ```

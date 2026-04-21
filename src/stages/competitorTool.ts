@@ -2,8 +2,9 @@ import type { GateRule } from './types.js';
 
 export const COMPETITOR_TOOLS: Record<string, readonly string[]> = {
   'Resolve.ai': [
-    'Coinbase', 'Zscaler', 'DoorDash', 'MongoDB', 'MSCI', 'Salesforce',
-    'DataStax', 'Blueground', 'Tubi', 'Rappi',
+    'Coinbase', 'DoorDash', 'Salesforce', 'MongoDB', 'Zscaler', 'Gametime',
+    'MSCI', 'Toast', 'Pinecone', 'Guidewire', 'Blueground', 'Modal',
+    'Fireworks AI', 'Upwind', 'Veza',
   ],
   'Rootly': [
     'Wealthsimple', 'Clay', 'Motive', 'Lucidworks', 'Replit', 'Achievers',
@@ -16,43 +17,23 @@ export const COMPETITOR_TOOLS: Record<string, readonly string[]> = {
     'Vercel', 'dbt Labs', 'Pipe', 'Duffel', 'Primer', 'Netlify', 'TravelPerk',
     'monday.com',
   ],
-  'FireHydrant': [
-    'AuditBoard', 'Snyk', 'Qlik', 'Recharge', 'Bluecore', 'LaunchDarkly',
+  'Traversal': [
+    'DigitalOcean', 'Cloudways', 'American Express', 'Pepsi',
   ],
-  'PagerDuty': [
-    'Picnic', 'Jeppesen', 'Wehkamp', 'SendGrid', 'REA Group', 'Cloudflare',
-    'TUI', 'BukuWarung', 'Ryanair', 'Anaplan', 'Guidewire', 'Specsavers',
-    'Fox Corporation', 'IBM', 'GE', 'Capital One', 'American Eagle Outfitters',
-    'Pitney Bowes', 'Box', 'ING', 'Comcast', 'eHarmony', 'Slack', 'Lululemon',
-    'Twilio', 'Airbnb', 'Zoom',
+  'TierZero': [
+    'Brex', 'Discord', 'Drata', 'Framer', 'Eaze', 'WeightWatchers',
+    'Weight Watchers', 'Aerospace', 'Modern Loop', 'ModrenLoop',
   ],
-  'Opsgenie': [
-    'Overstock', 'Looker', 'Zendesk', 'Dynatrace', 'EBSCO', 'Air Canada',
-    'The Washington Post', 'Yahoo', 'Politico', 'SolarWinds',
-    'Oregon State University', 'Glassdoor', 'Cloudticity', 'Unbounce',
-    'Bleacher Report', 'iFood',
+  'RunLLM': [
+    'Databricks', 'LlamaIndex', 'DataHub', 'Corelight', 'StreamNative',
+    'Monte Carlo', 'MotherDuck', 'Embrace', 'Eppo', 'Arize', 'DSPy', 'vLLM',
   ],
-  'xMatters': [
-    'Kroger', 'ViaSat', 'Constant Contact', 'BMC', 'American Airlines',
-    'Athenahealth', 'O2', 'Tesco', 'WesCEF', 'NBN Co',
-    'Intermountain Healthcare', 'Pacific Life', 'Kellogg', 'Principal',
-    'Accenture', 'Credigy',
+  'Neubird': [
+    'Agero', 'Model Rocket', 'KAI AI', 'DeepHealth', 'Everpure',
+    'Pure Storage', 'Commonwealth Bank',
   ],
-  'Splunk On-Call': [
-    'NVIDIA', 'Cisco', 'NBC', 'Rackspace', 'Intuit', 'DirecTV', 'NASCAR',
-    'Arrow Electronics', 'Alliance Health', 'NetApp', 'Edmunds',
-    'New York Times', 'Return Path', 'Sony PlayStation', 'CA Technologies',
-    'Sphero', 'Symantec', 'HBO', 'Weatherford', 'Blackboard', 'Epic Games',
-  ],
-  'BigPanda': [
-    'IHG Hotels & Resorts', 'New York Stock Exchange (NYSE)', 'Playtika',
-    'FreeWheel (Comcast)', 'WEC Energy Group', 'Autodesk', 'Zayo', 'GAP',
-    'Intel', 'Cisco', 'United Airlines', 'Abbott', 'Marriott', 'Expedia',
-  ],
-  'Moogsoft': [
-    'Verizon Media', 'Qualcomm', 'Fannie Mae', 'GoDaddy', 'KeyBank',
-    'HCL Technologies', 'SAP SuccessFactors', 'Fiserv', 'American Airlines',
-    'INRIX', 'Yahoo', 'Intuit', 'Worldpay',
+  'Wildmoose': [
+    'Wix', 'Redis', 'GoFundMe', 'Go Fund Me',
   ],
 };
 
@@ -78,8 +59,15 @@ export const competitorToolGate: GateRule<CompetitorToolData> = (d) =>
 
 export function formatCompetitorToolForAttio(d: CompetitorToolData): string {
   if (d.matchedTools.length === 0) return 'Not using any competitor tools';
-  return d.matchedTools.join(', ');
+  const evidence = d.matchedTools.map((t) => `Evidence: (${t}'s customer page)`).join('\n');
+  return `${d.matchedTools.join(', ')}\n\n${evidence}`;
 }
 
 export const competitorToolCacheGate = (cached: string): boolean =>
   cached.trim() === 'Not using any competitor tools';
+
+export function extractMatchedToolsFromCached(cached: string): string[] {
+  const firstLine = cached.trim().split('\n')[0]?.trim() ?? '';
+  if (!firstLine || firstLine === 'Not using any competitor tools') return [];
+  return firstLine.split(',').map((s) => s.trim()).filter(Boolean);
+}
