@@ -1,18 +1,7 @@
-import { extractMatchedToolsFromCached, type CompetitorToolData } from './stages/competitorTool.js';
 import type { DigitalNativeData } from './stages/digitalNative.js';
 import type { ObservabilityToolData } from './stages/observabilityTool.js';
 import type { CommunicationToolData } from './stages/communicationTool.js';
 import type { CloudToolData } from './stages/cloudTool.js';
-
-export function competitorToolRejectionReason(d: CompetitorToolData): string {
-  return `Competitor Tooling: using ${d.matchedTools.join(', ')}`;
-}
-
-export function competitorToolCacheRejectionReason(cached: string): string {
-  const tools = extractMatchedToolsFromCached(cached);
-  const names = tools.length > 0 ? tools.join(', ') : cached.trim();
-  return `Competitor Tooling: using ${names}`;
-}
 
 export function digitalNativeRejectionReason(_d: DigitalNativeData): string {
   return 'Digital Native: not a digital-native company';

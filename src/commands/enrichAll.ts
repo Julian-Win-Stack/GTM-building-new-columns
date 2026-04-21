@@ -1,7 +1,7 @@
 import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS, STATUSPAGE_RETRY_TRIES, STATUSPAGE_RETRY_BASE_MS } from '../config.js';
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch, aiAdoptionMindsetExaSearch, aiSreMaturityExaSearch, industryExaSearch, type ExaSearchResponse } from '../apis/exa.js';
-import { collectJobUrls, theirstackJobsByTechnology } from '../apis/theirstack.js';
+import { collectJobUrls, theirstackJobsByTechnology, theirstackJobsByAnySlugs } from '../apis/theirstack.js';
 import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi } from '../rateLimit.js';
 import { deriveDomain, normalizeLinkedInUrl } from '../util.js';
 import type { EnrichmentResult, InputRow } from '../types.js';
@@ -11,7 +11,6 @@ import { writeStageColumn } from '../writeStageColumn.js';
 import { filterSurvivors, filterCachedSurvivors } from '../filterSurvivors.js';
 import { writeRejectionReasons } from '../writeRejectionReason.js';
 import {
-  competitorToolRejectionReason, competitorToolCacheRejectionReason,
   digitalNativeRejectionReason, digitalNativeCacheRejectionReason,
   numberOfUsersRejectionReason,
   observabilityToolRejectionReason, observabilityToolCacheRejectionReason,
@@ -41,9 +40,9 @@ import {
 } from '../stages/communicationTool.js';
 import {
   matchCompetitorTools,
-  competitorToolGate,
   formatCompetitorToolForAttio,
-  competitorToolCacheGate,
+  detectCompetitorToolsFromTheirStack,
+  COMPETITOR_THEIRSTACK_SLUGS,
   type CompetitorToolData,
 } from '../stages/competitorTool.js';
 import {
@@ -249,29 +248,61 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     return;
   }
 
-  // Stage 1 — Competitor Tool (local match, no API call)
+  // Stage 1 — Competitor Tool (local match + TheirStack sub-step, no gate)
   const stage1Slug = FIELD_SLUGS['Competitor Tooling']!;
   const { todo: stage1Todo, done: stage1Done } = splitByCache(companies, attioCache, stage1Slug);
   console.log(`[competitorTool] todo=${stage1Todo.length} skipped=${stage1Done.length}`);
 
-  const stage1Results: StageResult<CompetitorToolData>[] = stage1Todo.map((company) => ({
-    company,
-    data: { matchedTools: matchCompetitorTools(company.companyName) },
-  }));
-  await writeStageColumn('Competitor Tooling', stage1Results, formatCompetitorToolForAttio);
-  for (const r of stage1Results) {
-    if (r.error === undefined) {
-      const existing = attioCache.get(r.company.domain) ?? {};
-      attioCache.set(r.company.domain, {
-        ...existing,
-        [stage1Slug]: formatCompetitorToolForAttio(r.data),
-      });
+  const stage1LocallyMatched: StageResult<CompetitorToolData>[] = [];
+  const stage1NeedsTheirStack: StageCompany[] = [];
+  for (const company of stage1Todo) {
+    const data = matchCompetitorTools(company.companyName);
+    if (data.matchedTools.length > 0) {
+      stage1LocallyMatched.push({ company, data });
+    } else {
+      stage1NeedsTheirStack.push(company);
     }
   }
-  const { survivors: stage1TodoSurvivors, rejected: stage1TodoRejected } = filterSurvivors('competitorTool', stage1Results, competitorToolGate, competitorToolRejectionReason);
-  const { survivors: stage1DoneSurvivors, rejected: stage1DoneRejected } = filterCachedSurvivors('competitorTool', stage1Done, attioCache, stage1Slug, competitorToolCacheGate, competitorToolCacheRejectionReason);
-  await writeRejectionReasons([...stage1TodoRejected, ...stage1DoneRejected]);
-  const survivorsAfterStage1 = [...stage1TodoSurvivors, ...stage1DoneSurvivors];
+
+  await writeStageColumn('Competitor Tooling', stage1LocallyMatched, formatCompetitorToolForAttio);
+  for (const r of stage1LocallyMatched) {
+    if (r.error !== undefined) continue;
+    const existing = attioCache.get(r.company.domain) ?? {};
+    attioCache.set(r.company.domain, { ...existing, [stage1Slug]: formatCompetitorToolForAttio(r.data) });
+  }
+
+  await runStage<CompetitorToolData, CompetitorToolData>({
+    name: 'competitorTool',
+    companies: stage1NeedsTheirStack,
+    batchSize: 1,
+    retry: { tries: THEIRSTACK_RETRY_TRIES, baseMs: THEIRSTACK_RETRY_BASE_MS },
+    call: async (domains) => {
+      const domain = domains[0]!;
+      const res = await scheduleTheirstack(() =>
+        theirstackJobsByAnySlugs(domain, [...COMPETITOR_THEIRSTACK_SLUGS])
+      );
+      const job = res.data?.[0];
+      if (!job) return { matchedTools: [], evidence: {} };
+      const detected = detectCompetitorToolsFromTheirStack(job);
+      const sourceUrl = collectJobUrls(job);
+      const evidence: CompetitorToolData['evidence'] = {};
+      for (const tool of detected) evidence[tool] = { type: 'theirstack', sourceUrl };
+      return { matchedTools: detected, evidence };
+    },
+    parse: (data, batch) => batch.map((c) => ({ company: c, data })),
+    afterBatch: async (batchResults) => {
+      await writeStageColumn('Competitor Tooling', batchResults, formatCompetitorToolForAttio);
+      for (const r of batchResults) {
+        if (r.error === undefined) {
+          const existing = attioCache.get(r.company.domain) ?? {};
+          attioCache.set(r.company.domain, { ...existing, [stage1Slug]: formatCompetitorToolForAttio(r.data) });
+        }
+      }
+    },
+  });
+
+  // No gate — all companies continue to Stage 2
+  const survivorsAfterStage1 = [...stage1Todo, ...stage1Done];
 
   // Stage 2 — Digital Native
   const stage2Slug = FIELD_SLUGS['Digital Native']!;

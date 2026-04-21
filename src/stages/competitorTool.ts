@@ -1,4 +1,4 @@
-import type { GateRule } from './types.js';
+import type { TheirstackJob } from '../apis/theirstack.js';
 
 export const COMPETITOR_TOOLS: Record<string, readonly string[]> = {
   'Resolve.ai': [
@@ -38,37 +38,57 @@ export const COMPETITOR_TOOLS: Record<string, readonly string[]> = {
   ],
 };
 
-export type CompetitorToolData = {
-  matchedTools: string[];
+export const COMPETITOR_THEIRSTACK_SLUGS = ['komodor', 'mezmo', 'rootly-slack'] as const;
+type CompetitorTheirStackSlug = typeof COMPETITOR_THEIRSTACK_SLUGS[number];
+
+const THEIRSTACK_SLUG_TO_TOOL: Record<CompetitorTheirStackSlug, string> = {
+  'komodor': 'Komodor',
+  'mezmo': 'Mezmo',
+  'rootly-slack': 'Rootly',
 };
 
-export function matchCompetitorTools(companyName: string | undefined): string[] {
-  if (!companyName) return [];
+export type CompetitorToolEvidence =
+  | { type: 'customer_page' }
+  | { type: 'theirstack'; sourceUrl: string };
+
+export type CompetitorToolData = {
+  matchedTools: string[];
+  evidence: Record<string, CompetitorToolEvidence>;
+};
+
+export function matchCompetitorTools(companyName: string | undefined): CompetitorToolData {
+  if (!companyName) return { matchedTools: [], evidence: {} };
   const normalized = companyName.trim().toLowerCase();
-  if (!normalized) return [];
-  const matches: string[] = [];
+  if (!normalized) return { matchedTools: [], evidence: {} };
+  const matchedTools: string[] = [];
+  const evidence: Record<string, CompetitorToolEvidence> = {};
   for (const [tool, companies] of Object.entries(COMPETITOR_TOOLS)) {
     if (companies.some((c) => c.toLowerCase() === normalized)) {
-      matches.push(tool);
+      matchedTools.push(tool);
+      evidence[tool] = { type: 'customer_page' };
     }
   }
-  return matches;
+  return { matchedTools, evidence };
 }
 
-export const competitorToolGate: GateRule<CompetitorToolData> = (d) =>
-  d.matchedTools.length === 0;
+export function detectCompetitorToolsFromTheirStack(job: TheirstackJob): string[] {
+  const slugSet = new Set((job.technology_slugs ?? []).map((s) => s.toLowerCase()));
+  const nameSet = new Set((job.technology_names ?? []).map((n) => n.toLowerCase()));
+  const detected: string[] = [];
+  for (const slug of COMPETITOR_THEIRSTACK_SLUGS) {
+    if (slugSet.has(slug) || nameSet.has(slug)) {
+      detected.push(THEIRSTACK_SLUG_TO_TOOL[slug]);
+    }
+  }
+  return detected;
+}
 
 export function formatCompetitorToolForAttio(d: CompetitorToolData): string {
   if (d.matchedTools.length === 0) return 'Not using any competitor tools';
-  const evidence = d.matchedTools.map((t) => `Evidence: (${t}'s customer page)`).join('\n');
-  return `${d.matchedTools.join(', ')}\n\n${evidence}`;
-}
-
-export const competitorToolCacheGate = (cached: string): boolean =>
-  cached.trim() === 'Not using any competitor tools';
-
-export function extractMatchedToolsFromCached(cached: string): string[] {
-  const firstLine = cached.trim().split('\n')[0]?.trim() ?? '';
-  if (!firstLine || firstLine === 'Not using any competitor tools') return [];
-  return firstLine.split(',').map((s) => s.trim()).filter(Boolean);
+  const evidenceLines = d.matchedTools.map((t) => {
+    const ev = d.evidence[t];
+    if (!ev || ev.type === 'customer_page') return `Evidence: (${t}'s customer page)`;
+    return `Evidence: ${ev.sourceUrl}`;
+  }).join('\n');
+  return `${d.matchedTools.join(', ')}\n\n${evidenceLines}`;
 }

@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  competitorToolRejectionReason,
-  competitorToolCacheRejectionReason,
   digitalNativeRejectionReason,
   digitalNativeCacheRejectionReason,
   numberOfUsersRejectionReason,
@@ -12,40 +10,6 @@ import {
   cloudToolRejectionReason,
   cloudToolCacheRejectionReason,
 } from './rejectionReasons.js';
-
-describe('competitorToolRejectionReason', () => {
-  it('single tool', () => {
-    expect(competitorToolRejectionReason({ matchedTools: ['Rootly'] })).toBe('Competitor Tooling: using Rootly');
-  });
-
-  it('multiple tools', () => {
-    expect(competitorToolRejectionReason({ matchedTools: ['Rootly', 'Incident.io'] })).toBe('Competitor Tooling: using Rootly, Incident.io');
-  });
-});
-
-describe('competitorToolCacheRejectionReason', () => {
-  it('extracts tool from legacy single-line cache', () => {
-    expect(competitorToolCacheRejectionReason('Rootly')).toBe('Competitor Tooling: using Rootly');
-  });
-
-  it('handles multiple tools in legacy cache', () => {
-    expect(competitorToolCacheRejectionReason('Rootly, Incident.io')).toBe('Competitor Tooling: using Rootly, Incident.io');
-  });
-
-  it('trims whitespace', () => {
-    expect(competitorToolCacheRejectionReason('  Incident.io  ')).toBe('Competitor Tooling: using Incident.io');
-  });
-
-  it('extracts tools from new format with evidence lines', () => {
-    const cached = "Rootly\n\nEvidence: (Rootly's customer page)";
-    expect(competitorToolCacheRejectionReason(cached)).toBe('Competitor Tooling: using Rootly');
-  });
-
-  it('extracts multiple tools from new format with evidence lines', () => {
-    const cached = "Resolve.ai, Rootly\n\nEvidence: (Resolve.ai's customer page)\nEvidence: (Rootly's customer page)";
-    expect(competitorToolCacheRejectionReason(cached)).toBe('Competitor Tooling: using Resolve.ai, Rootly');
-  });
-});
 
 describe('digitalNativeRejectionReason', () => {
   it('returns the static reason regardless of data', () => {

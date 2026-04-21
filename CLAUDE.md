@@ -41,7 +41,7 @@ src/
     twitterapi.ts   — twitterapi.io client: twitterAdvancedSearch (GET /twitter/tweet/advanced_search); fetchComplaintTweets (paginated, caps at 50 tweets, since_time=90 days ago)
     statuspage.ts   — Statuspage v2 client (no auth): slugCandidates (strips legal suffixes, returns compact + dashed), fetchRecentIncidents (probes https://status.{domain} then https://{slug}.statuspage.io, paginates 90-day window)
   commands/
-    enrichAll.ts    — stage-wise bulk enrichment: Stage 1 → write → filter → Stage 2 → …
+    enrichAll.ts    — stage-wise bulk enrichment: Stage 1 → write → Stage 2 → filter → …
     enrichCompany.ts — enrich one company by domain (row-wise, uses pipeline.ts)
     enrichColumn.ts — overwrite one column for one company
     attioSmoke.ts   — smoke test: upsert Company Name + Domain only
@@ -49,7 +49,7 @@ src/
     index.ts        — ENRICHERS map (EnrichableColumn → EnricherFn) + ENRICHABLE_COLUMN_LIST
   stages/
     types.ts        — StageCompany, StageResult<T>, GateRule<T>
-    competitorTool.ts   — Stage 1: local company-name match against known customer lists, gate (reject if any match), Attio formatter (comma-joined tool names or "Not using any competitor tools")
+    competitorTool.ts   — Stage 1: local company-name match against COMPETITOR_TOOLS + TheirStack sub-call (komodor/mezmo/rootly-slack) for non-locally-matched companies; no gate; Attio formatter (comma-joined tool names + per-tool evidence, or "Not using any competitor tools"); exports COMPETITOR_THEIRSTACK_SLUGS, detectCompetitorToolsFromTheirStack
     digitalNative.ts    — Stage 2: parser (structured JSON), gate, Attio formatter
     observabilityTool.ts — Stage 4: async parser (structured JSON), LinkedIn profile verification via Azure OpenAI judge(), gate (Datadog/Grafana/Prometheus allowlist), Attio formatter
     communicationTool.ts — Stage 5: sync parser, two-step TheirStack search (Slack → Microsoft Teams), gate (reject if MS Teams), Attio formatter
@@ -116,7 +116,7 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 
 | # | Column | API | Gate (pass condition) |
 |---|---|---|---|
-| 1 | Competitor Tooling | *local match* | company name NOT in any competitor-tool customer list (Resolve.ai, Rootly, Incident.io, Traversal, TierZero, RunLLM, Neubird, Wildmoose) |
+| 1 | Competitor Tooling | local match + TheirStack | no gate — data collection only |
 | 2 | Digital Native | Exa | category is NOT `NOT Digital-native` |
 | 3 | Number of Users | Exa | conditional: for `Digital-native B2B` only — `user_count_bucket` must be `100K+`; non-B2B, fetch errors, and `unknown` bucket pass unconditionally (unknown = flag for human review, not rejected) |
 | 4 | Observability Tool | Exa | no tool evidence OR at least one of: Datadog, Grafana, Prometheus |
@@ -134,9 +134,9 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 16 | AI SRE maturity | Exa | no gate — data collection only |
 | 17 | Industry | Exa | no gate — data collection only |
 
-Stages 1–6 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing. Immediately after each gate, rejected companies receive a `Reason for Rejection` value written to Attio (crash-safe, via `writeRejectionReasons` in `src/writeRejectionReason.ts`). The reason format is `"<Stage name>: <specific reason>"` (e.g. `"Cloud Tool: uses Azure (not AWS/GCP)"`). Errored companies (fetch/parse failure) are not written — they will be retried on the next run.
+Stages 2–6 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing. Immediately after each gate, rejected companies receive a `Reason for Rejection` value written to Attio (crash-safe, via `writeRejectionReasons` in `src/writeRejectionReason.ts`). The reason format is `"<Stage name>: <specific reason>"` (e.g. `"Cloud Tool: uses Azure (not AWS/GCP)"`). Errored companies (fetch/parse failure) are not written — they will be retried on the next run.
 
-Stage 1 (Competitor Tooling) is purely local — no API call, no rate limit. Matching is case-insensitive exact match on the trimmed CSV company name against the per-tool customer lists in `src/stages/competitorTool.ts:COMPETITOR_TOOLS`. To update the list, edit that constant directly.
+Stage 1 (Competitor Tooling) is **not a gating stage**. All companies continue to Stage 2 regardless of findings. Stage 1 runs in two steps per company: (a) local exact case-insensitive match against `COMPETITOR_TOOLS` (hardcoded customer lists) — if matched, writes result and skips the API call; (b) for companies with no local match, calls TheirStack with `job_technology_slug_or: ["komodor","mezmo","rootly-slack"]` and checks both `technology_slugs` and `technology_names` for those keywords (exact case-insensitive equality); maps slug→tool: `komodor`→Komodor, `mezmo`→Mezmo, `rootly-slack`→Rootly. To update the hardcoded lists, edit `COMPETITOR_TOOLS` in `src/stages/competitorTool.ts` directly. TheirStack-based detection uses `scheduleTheirstack()` + `THEIRSTACK_RETRY_*` retry settings.
 
 ### Attio value format for Exa-based stages
 
@@ -191,20 +191,30 @@ Both: <source_url>
 Stage 5 is batch-of-2 (like Digital Native). Exa returns the actual vendor name from source evidence; `tool` is a free-form string (no enum constraint). Gate passes AWS / GCP / Both / no-evidence; rejects any other cloud (Azure, IBM Cloud, etc.).
 If no evidence found: literal `No evidence found`.
 
-**Competitor Tooling** — comma-joined competitor tool names on the first line, blank line, then one `Evidence: (<Tool>'s customer page)` line per matched tool:
+**Competitor Tooling** — comma-joined competitor tool names on the first line, blank line, then one `Evidence:` line per matched tool. Evidence format depends on detection path:
+- Hardcoded customer list match → `Evidence: (<Tool>'s customer page)`
+- TheirStack job-signal match → `Evidence: <source_url>` (actual URL from `collectJobUrls(job)`)
+
+Example (hardcoded):
 ```
 Rootly
 
 Evidence: (Rootly's customer page)
 ```
-or (multiple matches):
+Example (TheirStack):
 ```
-Resolve.ai, Rootly
+Komodor
+
+Evidence: https://jobs.example.com/123
+```
+Example (multiple tools, mixed sources):
+```
+Resolve.ai, Komodor
 
 Evidence: (Resolve.ai's customer page)
-Evidence: (Rootly's customer page)
+Evidence: https://jobs.example.com/123
 ```
-or (no match, passed):
+No match:
 ```
 Not using any competitor tools
 ```
@@ -395,6 +405,7 @@ npm test
 - Outbound Apify calls must be wrapped in `scheduleApify(...)` — never call `runHarvestLinkedInEmployees` or `runCareerSiteJobListings` directly
 - Outbound twitterapi.io calls must be wrapped in `scheduleTwitterApi(...)` — never call `twitterAdvancedSearch` or `fetchComplaintTweets` directly
 - Outbound Statuspage calls must be wrapped in `scheduleStatuspage(...)` — never call the Statuspage axios client directly
+- TheirStack response parsing must check both `technology_slugs` and `technology_names` (exact case-insensitive equality) when filtering by technology keyword
 - No comments unless the WHY is non-obvious
 
 ## Testing

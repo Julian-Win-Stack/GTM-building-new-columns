@@ -12,6 +12,7 @@ export type TheirstackJob = {
   url?: string | null;
   final_url?: string | null;
   technology_slugs?: string[];
+  technology_names?: string[];
 };
 
 export type TheirstackJobsResponse = { data: TheirstackJob[] };

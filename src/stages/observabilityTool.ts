@@ -169,11 +169,15 @@ async function fetchTheirStackTools(
   const res = await scheduleTheirstack(() => theirstackJobsByAnySlugs(domain, [...slugs]));
   const job = res.data?.[0];
   if (!job) return [];
-  const techSlugs = job.technology_slugs ?? [];
+  const techSlugs = new Set((job.technology_slugs ?? []).map((s) => s.toLowerCase()));
+  const techNames = new Set((job.technology_names ?? []).map((n) => n.toLowerCase()));
   const sourceUrl = collectJobUrls(job);
   if (!sourceUrl) return [];
   return slugs
-    .filter((s) => techSlugs.includes(s))
+    .filter((s) => {
+      const lower = s.toLowerCase();
+      return techSlugs.has(lower) || techNames.has(lower);
+    })
     .map((s) => ({ name: SLUG_DISPLAY[s] ?? s, sourceUrl }));
 }
 

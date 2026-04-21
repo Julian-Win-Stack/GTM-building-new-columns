@@ -504,6 +504,43 @@ describe('parseObservabilityToolResponse — TheirStack fallback', () => {
   });
 });
 
+describe('parseObservabilityToolResponse — TheirStack technology_names fallback', () => {
+  it('detects tool via technology_names when technology_slugs is empty', async () => {
+    mockTheirStack.mockResolvedValueOnce({
+      data: [{ source_url: 'https://jobs.ts.com/1', technology_slugs: [], technology_names: ['Datadog'] }],
+    });
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    expect(mockTheirStack).toHaveBeenCalled();
+    const names = results[0]!.data!.tools.map((t) => t.name);
+    expect(names).toContain('Datadog');
+  });
+
+  it('is case-insensitive for technology_names', async () => {
+    mockTheirStack.mockResolvedValueOnce({
+      data: [{ source_url: 'https://jobs.ts.com/1', technology_names: ['GRAFANA'] }],
+    });
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    const names = results[0]!.data!.tools.map((t) => t.name);
+    expect(names).toContain('Grafana');
+  });
+
+  it('does not match when slug absent from both technology_slugs and technology_names', async () => {
+    mockTheirStack
+      .mockResolvedValueOnce({
+        data: [{ source_url: 'https://jobs.ts.com/1', technology_slugs: [], technology_names: ['Splunk'] }],
+      })
+      .mockResolvedValueOnce({ data: [] });
+    const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
+    const results = await parseObservabilityToolResponse(raw, [co1]);
+    const names = results[0]!.data!.tools.map((t) => t.name);
+    expect(names).not.toContain('Datadog');
+    expect(names).not.toContain('Grafana');
+    expect(names).not.toContain('Prometheus');
+  });
+});
+
 describe('observabilityToolCacheGate', () => {
   it('passes No evidence found', () => {
     expect(observabilityToolCacheGate('No evidence found')).toBe(true);
