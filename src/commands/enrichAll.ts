@@ -1,4 +1,4 @@
-import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS, STATUSPAGE_RETRY_TRIES, STATUSPAGE_RETRY_BASE_MS } from '../config.js';
+import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEIRSTACK_RETRY_BASE_MS, APOLLO_RETRY_TRIES, APOLLO_RETRY_BASE_MS, APIFY_RETRY_TRIES, APIFY_RETRY_BASE_MS, TWITTER_API_RETRY_TRIES, TWITTER_API_RETRY_BASE_MS, STATUSPAGE_RETRY_TRIES, STATUSPAGE_RETRY_BASE_MS, ENRICHABLE_COLUMNS } from '../config.js';
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch, aiAdoptionMindsetExaSearch, aiSreMaturityExaSearch, industryExaSearch, type ExaSearchResponse } from '../apis/exa.js';
 import { collectJobUrls, theirstackJobsByTechnology, theirstackJobsByAnySlugs } from '../apis/theirstack.js';
@@ -66,6 +66,7 @@ import { fetchRecentIncidents, type FetchOutcome as StatuspageFetchOutcome } fro
 import { parseAiAdoptionMindsetResponse, formatAiAdoptionMindsetForAttio, type AiAdoptionMindsetData } from '../stages/aiAdoptionMindset.js';
 import { parseAiSreMaturityResponse, formatAiSreMaturityForAttio, type AiSreMaturityData } from '../stages/aiSreMaturity.js';
 import { parseIndustryResponse, formatIndustryForAttio, type IndustryData } from '../stages/industry.js';
+import { computeInputHash, scoreCompanyContext, formatContextScoreForAttio, type ContextScoreData } from '../stages/companyContextScore.js';
 import { fetchAllRecords, upsertCompanyByDomain, upsertCompanyByLinkedInUrl, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
@@ -785,6 +786,57 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
           const existing = attioCache.get(r.company.domain) ?? {};
           attioCache.set(r.company.domain, { ...existing, [stage17Slug]: formatIndustryForAttio(r.data) });
         }
+      }
+    },
+  });
+
+  // Stage 18 — Company Context Score (OpenAI synthesis, hash-gated re-run)
+  // Re-scores when any of the 17 input cells changes; hash stored in Attio for durability.
+  const stage18Slug = FIELD_SLUGS['Company Context Score']!;
+  const hashSlug = FIELD_SLUGS['Change Detection Column for Developer']!;
+  const enrichableSlugsForHash = (ENRICHABLE_COLUMNS as readonly string[])
+    .filter((c) => c !== 'Company Context Score')
+    .map((c) => FIELD_SLUGS[c]!);
+
+  const stage18Eligible = survivorsAfterStage6.filter((c) => {
+    const values = attioCache.get(c.domain) ?? {};
+    return enrichableSlugsForHash.every((slug) => !!values[slug]);
+  });
+
+  const stage18Todo = stage18Eligible.filter((c) => {
+    const values = attioCache.get(c.domain) ?? {};
+    const currentHash = computeInputHash(values, enrichableSlugsForHash);
+    return values[hashSlug] !== currentHash;
+  });
+
+  console.log(`[contextScore] eligible=${stage18Eligible.length} todo=${stage18Todo.length} hash-skipped=${stage18Eligible.length - stage18Todo.length}`);
+
+  await runStage<Record<string, string>, ContextScoreData>({
+    name: 'contextScore',
+    companies: stage18Todo,
+    batchSize: 1,
+    retry: { tries: 3, baseMs: 1000 },
+    call: (domains) => Promise.resolve(attioCache.get(domains[0]!) ?? {}),
+    parse: async (values, batch) => {
+      const company = batch[0]!;
+      const data = await scoreCompanyContext(company, values);
+      return [{ company, data }];
+    },
+    afterBatch: async (batchResults) => {
+      for (const r of batchResults) {
+        if (r.error !== undefined) continue;
+        const values = attioCache.get(r.company.domain) ?? {};
+        const hash = computeInputHash(values, enrichableSlugsForHash);
+        const cell = formatContextScoreForAttio(r.data);
+        await attioWriteLimit(() =>
+          upsertCompanyByDomain({
+            'Company Name': r.company.companyName,
+            'Domain': r.company.domain,
+            'Company Context Score': cell,
+            'Change Detection Column for Developer': hash,
+          })
+        );
+        attioCache.set(r.company.domain, { ...values, [stage18Slug]: cell, [hashSlug]: hash });
       }
     },
   });

@@ -24,6 +24,8 @@ export const FIELD_SLUGS: Record<string, string> = {
   'AI adoption mindset': 'ai_adoption_mindset',
   'AI SRE maturity': 'ai_sre_maturity',
   'Industry': 'industry',
+  'Company Context Score': 'company_context_score',
+  'Change Detection Column for Developer': 'change_detection_column_for_developer',
   'Reason for Rejection': 'reason_for_rejection',
 };
 

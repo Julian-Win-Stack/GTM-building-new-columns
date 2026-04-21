@@ -17,6 +17,7 @@ export const KEYS = {
   azureOpenAIKey: process.env.AZURE_OPENAI_API_KEY ?? '',
   azureOpenAIBaseUrl: process.env.AZURE_OPENAI_BASE_URL ?? '',
   azureOpenAIDeployment: process.env.AZURE_OPENAI_DEPLOYMENT ?? '',
+  azureOpenAIDeploymentPro: process.env.AZURE_OPENAI_DEPLOYMENT_PRO ?? '',
   attio: process.env.ATTIO_API_KEY ?? '',
   attioObjectSlug: process.env.ATTIO_OBJECT_SLUG ?? 'ranked_companies',
   apollo: process.env.APOLLO_API_KEY ?? '',
@@ -66,4 +67,5 @@ export const ENRICHABLE_COLUMNS = [
   'AI adoption mindset',
   'AI SRE maturity',
   'Industry',
+  'Company Context Score',
 ] as const;

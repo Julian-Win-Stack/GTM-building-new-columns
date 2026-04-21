@@ -23,6 +23,7 @@ export type EnrichableColumn =
   | 'AI adoption mindset'
   | 'AI SRE maturity'
   | 'Industry'
+  | 'Company Context Score'
   | 'Reason for Rejection';
 
 export type EnrichmentResult = {
@@ -47,6 +48,8 @@ export type EnrichmentResult = {
   'AI adoption mindset': string;
   'AI SRE maturity': string;
   'Industry': string;
+  'Company Context Score': string;
+  'Change Detection Column for Developer': string;
   'Reason for Rejection': string;
 };
 
