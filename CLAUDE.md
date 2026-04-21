@@ -1,5 +1,5 @@
 # Project
-CLI script that enriches the companies data (from a CSV) via Apify, Exa, TheirStack, and Azure OpenAI, then writes results to an Attio custom object (`ranked_companies`).
+**Bacca.ai** is an AI SRE startup that sells software to high-scale digital-native platforms. This CLI script is part of Bacca's GTM motion: it enriches a list of potential customers (from a CSV) via Apify, Exa, TheirStack, and Azure OpenAI, then writes results to an Attio custom object (`ranked_companies`). The enrichment columns score each company against Bacca's ICP criteria — digital nativeness, scale, observability stack, cloud platform, hiring signal, and more — so the sales team can prioritise outreach.
 
 ## Stack
 - TypeScript (strict, ESNext modules, `tsx` for direct execution)
