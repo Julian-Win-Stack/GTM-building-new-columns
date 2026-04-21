@@ -42,6 +42,8 @@ src/
     statuspage.ts   — Statuspage v2 client (no auth): slugCandidates (strips legal suffixes, returns compact + dashed), fetchRecentIncidents (probes https://status.{domain} then https://{slug}.statuspage.io, paginates 90-day window)
   commands/
     enrichAll.ts    — stage-wise bulk enrichment: Stage 1 → write → Stage 2 → filter → …
+    enrichAll.e2e.test.ts — E2E integration tests for the enrichAll pipeline (13 scenarios)
+    enrichAll.e2e.helpers.ts — test helpers: makeCsv, makeExaResponse, makeExaTextResponse
     enrichCompany.ts — enrich one company by domain (row-wise, uses pipeline.ts)
     enrichColumn.ts — overwrite one column for one company
     attioSmoke.ts   — smoke test: upsert Company Name + Domain only
@@ -65,6 +67,7 @@ src/
     aiAdoptionMindset.ts — Stage 15: text parser (passes Exa text output through verbatim), no gate, Attio formatter (verbatim Classification/Confidence/Evidence/Reasoning block)
     aiSreMaturity.ts    — Stage 16: text parser (passes Exa text output through verbatim), no gate, Attio formatter (verbatim Classification/Confidence/Sales signal/Evidence/Reasoning block)
     industry.ts         — Stage 17: parser (structured JSON, enum-enforced 23-category list), no gate, Attio formatter (two-line `industry: X\nreason: Y`); off-enum values yield error (cell left blank for retry)
+    companyContextScore.ts — Context Score State (Stage 18): OpenAI scorer (0–5, 0.5 increments) using all prior Attio cells; hash-gated re-run via `change_detection_column_for_developer`; exports computeInputHash, scoreCompanyContext, formatContextScoreForAttio
 data/input.csv      — input (gitignored)
 cache/              — disk cache for API responses
 ```
@@ -99,6 +102,7 @@ Tunables in `.env`:
 - `STATUSPAGE_CONCURRENCY` (default 20) — max concurrent Statuspage probes; no QPS limit (Statuspage has no documented rate limit and probes hit different hosts)
 - `STATUSPAGE_RETRY_TRIES` (default 3)
 - `STATUSPAGE_RETRY_BASE_MS` (default 1000)
+- `AZURE_OPENAI_DEPLOYMENT_PRO` (optional, default empty → falls back to `AZURE_OPENAI_DEPLOYMENT`) — stronger Azure deployment used exclusively by Stage 18 (Context Score State); set to `gpt-5.4-pro` to use the pro model
 
 ## Stage-wise pipeline (enrich-all)
 
@@ -133,6 +137,7 @@ Cached Attio values must still pass the stage's gate — otherwise a company rej
 | 15 | AI adoption mindset | Exa | no gate — data collection only |
 | 16 | AI SRE maturity | Exa | no gate — data collection only |
 | 17 | Industry | Exa | no gate — data collection only |
+| 18 | Company Context Score | Azure OpenAI (`gpt-5.4-pro`) | no gate — synthesis over prior Attio cells |
 
 Stages 2–6 are gating stages. Companies rejected at any gate are written to Attio with whatever columns were filled so far, then dropped from further processing. Immediately after each gate, rejected companies receive a `Reason for Rejection` value written to Attio (crash-safe, via `writeRejectionReasons` in `src/writeRejectionReason.ts`). The reason format is `"<Stage name>: <specific reason>"` (e.g. `"Cloud Tool: uses Azure (not AWS/GCP)"`). Errored companies (fetch/parse failure) are not written — they will be retried on the next run.
 
@@ -356,6 +361,17 @@ reason: <brief justification based on the company's core business>
 23 allowed categories: E-commerce, Marketplaces, Fintech, Payments, Crypto / Web3, Consumer social, Media / Streaming, Gaming, On-demand / Delivery, Logistics / Mobility, Travel / Booking, SaaS (B2B), SaaS (prosumer / PLG), Developer tools / APIs, Data / AI platforms, Cybersecurity, Adtech / Martech, Ride-sharing / transportation networks, Food tech, Creator economy platforms, Market data / trading platforms, Real-time communications (chat, voice, video APIs), IoT / connected devices platforms. `Unknown` is used when information is insufficient. If Exa returns a value outside this list, the cell is left blank and the company is retried next run.
 Stage 17 is batch-of-2 (batchSize: 2). Uses a structured JSON outputSchema with the enum declared so Exa is constrained to one of the allowed values. Operates on `survivorsAfterStage6`.
 
+**Company Context Score** (Context Score State) — two-line string:
+```
+<score>
+
+Reasoning: <2–4 sentences covering product nature, reliability sensitivity, industry, scale, and business model>
+```
+Score is one of: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5.
+Stage 18 is per-company (batchSize: 1). Uses Azure OpenAI (`gpt-5.4-pro` via `AZURE_OPENAI_DEPLOYMENT_PRO`, falls back to `AZURE_OPENAI_DEPLOYMENT`). Operates on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty in Attio.
+
+**Re-run gating (hash-based):** Stage 18 re-scores only when inputs change. On each run, a sha256 hash of the 17 input cell values (concatenated slug=value pairs) is compared to the stored hash in `change_detection_column_for_developer`. If equal → skip (no OpenAI call). If different or missing → re-score and overwrite both `company_context_score` and `change_detection_column_for_developer`. Because the hash is stored in Attio (not on disk), change-detection is durable across weeks and across machines. Adding a new enrichable column upstream automatically invalidates all hashes and triggers a full re-score on the next run.
+
 **Identity columns (Company Name, Domain, LinkedIn Page, Description)** — written once at pipeline start (before Stage 1) for every CSV row, via an "identity-write" step. Rules:
 - For each CSV row, fill any of the four columns that are currently **empty** in Attio using the CSV value. Never overwrite a non-empty Attio value (preserves human edits).
 - Match the Attio record by `Domain` when the CSV row has a Website, otherwise by `LinkedIn Page` (`upsertCompanyByLinkedInUrl`). Never by Company Name — name-based lookups were removed.
@@ -363,7 +379,7 @@ Stage 17 is batch-of-2 (batchSize: 2). Uses a structured JSON outputSchema with 
 - If a CSV row has **neither** a Domain nor a LinkedIn URL, skip the row entirely (no write, not added to the stage processing set).
 - CSV rows with only a LinkedIn URL (no Website) are resolved against the Attio cache via LinkedIn URL lookup to obtain a domain for subsequent stages. If the Attio record doesn't exist yet, the identity-write upserts by `linkedin_page`, but the row will not participate in stages keyed by domain until a future run after Attio assigns a domain.
 
-Stages 7–17 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged.
+Stages 7–17 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged. Stage 18 also operates on `survivorsAfterStage6` but applies an additional precondition: all 17 prior enrichable columns must be non-empty.
 
 Stages 11 and 12 share a single `runStage` invocation (one Apify call per company) whose `afterBatch` writes both Engineer Hiring and SRE Hiring columns. Cache-skip requires both slugs to be non-empty; either blank triggers a fresh call.
 
@@ -380,6 +396,7 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 - **Apify (fantastic-jobs/career-site-job-listing-feed)**: Engineer Hiring, SRE Hiring (single call per company feeds both columns)
 - **twitterapi.io + Azure OpenAI**: Customer complains on X (paginated tweet fetch → OpenAI 4-bucket classifier)
 - **Statuspage v2 (no auth)**: Recent incidents ( Official ) — probes `status.{domain}` then `{slug}.statuspage.io`, paginates 90-day window, no OpenAI
+- **Azure OpenAI (gpt-5.4-pro)**: Company Context Score (Stage 18) — feeds all 17 prior Attio cell values into a single structured-JSON judge() call; hash-gated re-run
 
 ## Commands
 ```
@@ -404,25 +421,43 @@ npm test
 - Outbound Apollo calls must be wrapped in `scheduleApollo(...)` — never call `apolloMixedPeopleApiSearch` directly
 - Outbound Apify calls must be wrapped in `scheduleApify(...)` — never call `runHarvestLinkedInEmployees` or `runCareerSiteJobListings` directly
 - Outbound twitterapi.io calls must be wrapped in `scheduleTwitterApi(...)` — never call `twitterAdvancedSearch` or `fetchComplaintTweets` directly
+- Stage 18 OpenAI model lives in `KEYS.azureOpenAIDeploymentPro` (env `AZURE_OPENAI_DEPLOYMENT_PRO`); never hardcode deployment names in stage files
 - Outbound Statuspage calls must be wrapped in `scheduleStatuspage(...)` — never call the Statuspage axios client directly
 - TheirStack response parsing must check both `technology_slugs` and `technology_names` (exact case-insensitive equality) when filtering by technology keyword
 - No comments unless the WHY is non-obvious
 
 ## Testing
+
+**Unit tests are the primary test layer.** Integration tests are a narrow safety net covering only what unit tests cannot reach.
+
+- **Unit tests** — one `*.test.ts` alongside each module (e.g. `src/util.ts` → `src/util.test.ts`). Cover parsers, formatters, gates, helpers, `runStage` retry/backoff, `filterSurvivors`, `writeStageColumn`, Attio HTTP shape. This is where most test coverage lives.
+- **Integration / E2E tests** — `src/commands/enrichAll.e2e.test.ts` (+ helpers in `src/commands/enrichAll.e2e.helpers.ts`). Drive the full `enrichAll` pipeline with module-mocked external APIs. **Scope is intentionally narrow**: cover ONLY orchestration logic that lives inline in `enrichAll.ts` and cannot be tested by a unit test — CSV ∪ Attio merge, identity-write no-overwrite, Stage 3's hand-rolled conditional gate, Stage 10 N/A branch, Stage 11+12 union-skip filter, cache-gate wiring, one representative rejection-propagation flow, dry-run.
+
+**Do NOT overbuild the integration suite.** Before adding a new E2E scenario, ask: *does a unit test already cover this logic in isolation?* If yes, do not add an E2E test for it. Specifically, do not add E2E tests for:
+- Per-stage gate correctness (each stage has its own `.test.ts`).
+- `filterSurvivors` / `runStage` / `writeStageColumn` mechanics (own unit tests).
+- Multi-domain batching, retry/backoff, parse-miss, errored-drop (already unit-tested).
+- Parser or formatter output shape (already unit-tested).
+- Attio HTTP/pagination (already unit-tested).
+One representative test for a given orchestration flow is enough — duplicating coverage across every stage is churn, not safety.
+
 After every build or code change:
-1. Write unit tests (or update existing ones) that directly cover the changed logic.
-2. Run the full test suite and ensure all tests pass before considering the task complete.
-3. Use `npm test` to run all tests. If no test file exists for the changed module, create one alongside it (e.g. `src/util.ts` → `src/util.test.ts`).
-4. Never mark a task done if any test is failing.
+1. Write or update **unit tests** that directly cover the changed logic. This is the default. If no test file exists for the changed module, create one alongside it.
+2. Only if the change touches orchestration logic inline in `enrichAll.ts` (merge, identity-write, the Stage 3 hand-rolled gate, Stage 10 N/A branch, Stage 11+12 union-skip, dry-run, or a new stage insertion) should you update or add an **E2E scenario** in `src/commands/enrichAll.e2e.test.ts`. Keep the suite narrow — update an existing scenario rather than adding a new one when possible.
+3. Run the full test suite (`npm test`) — both unit tests and integration tests must pass before considering the task complete.
+4. **Before any `git commit`**, re-run `npm test`. Both unit and integration tests must be green. Never commit with failing tests, and never skip tests (`--no-verify`, test exclusions) without explicit user approval.
+5. Never mark a task done if any test is failing.
 
 ## Rules
 - Never commit `.env` — only `.env.example`
 - `ATTIO_API_KEY` and all other secrets only in `.env`, read via `KEYS` in `config.ts`
 - `ATTIO_OBJECT_SLUG` defaults to `ranked_companies` in code; overridable via `.env`
-- Adding a new **enrichable** Attio column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `apis/attio.ts:FIELD_SLUGS`; for a gating-stage column, also add reason builders to `src/rejectionReasons.ts`. For a **non-enrichable** identity column (CSV-sourced, like `Description`), only `types.ts` (`InputRow` + `EnrichmentResult`) and `apis/attio.ts:FIELD_SLUGS` are needed — it stays out of `EnrichableColumn` / `ENRICHERS`.
+- Adding a new **enrichable** Attio column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `apis/attio.ts:FIELD_SLUGS`; for a gating-stage column, also add reason builders to `src/rejectionReasons.ts`. For a **non-enrichable** identity column (CSV-sourced, like `Description`), only `types.ts` (`InputRow` + `EnrichmentResult`) and `apis/attio.ts:FIELD_SLUGS` are needed — it stays out of `EnrichableColumn` / `ENRICHERS`. Also update `pipeline.ts:EnrichmentResult` literal. Note: adding any new upstream enrichable column automatically changes the hash for all companies and triggers a Stage 18 re-score on the next run — this is intentional (new signal → refreshed score).
 - Never add business logic decisions (what counts as Digital Native, confidence thresholds, etc.) without asking the user first
 - `toAttioValues` skips empty strings — enrichers must return `''` not `null`/`undefined` to avoid writing blanks to Attio
 - Never call `exa.search` directly — always go through `scheduleExa()`; never call `upsertCompanyByDomain` in a tight loop without the `attioWriteLimit` gate
+- Integration tests live in `src/commands/enrichAll.e2e.test.ts` — treat them as first-class alongside unit tests for running (both must pass before commit), but keep their scope narrow: orchestration-only behavior that unit tests cannot reach.
+- Do not add E2E scenarios that duplicate unit-test coverage. Before adding one, confirm the logic is not already tested by a stage `.test.ts`, `filterSurvivors.test.ts`, `runStage.test.ts`, or `writeStageColumn.test.ts`.
 
 ## Keep this CLAUDE.md current
 Update this file in the same change that introduces a new pattern, module, dependency, command, env var, or rule. Do not defer it. Specifically, when you:
