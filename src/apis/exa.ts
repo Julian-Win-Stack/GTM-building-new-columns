@@ -317,13 +317,21 @@ export async function observabilityToolExaSearch(domains: string[]): Promise<Exa
 
 const SYSTEM_PROMPT_FUNDING_GROWTH = `Find the most recent funding round for the companies. Return the round series (e.g. Seed, Series A, Series B), the amount raised, the date it was announced, and the source URL. If the latest round is not clearly labeled by series, just return whatever the most recent fundraising event was. Ignore older rounds — only the latest one matters.
 
-Search thoroughly: Crunchbase, PitchBook, CB Insights, press releases, SEC filings, the company's own blog, and reputable business news. Most companies have at least one publicly reported funding event. Only fall back to the "no funding" sentinel if you have genuinely searched and found nothing.
+Search thoroughly: Crunchbase, PitchBook, CB Insights, press releases, SEC filings, the company's own blog, and reputable business news. Most companies have at least one publicly reported funding event.
+
+If no external funding is found after a thorough search, explain WHY in the growth field — never return a generic no-data string. Consider which of the following applies and write a brief one-sentence explanation:
+- Bootstrapped / self-funded: no external capital has ever been raised (e.g. "Bootstrapped — no external funding publicly announced")
+- Profitable and capital-efficient: company generates sufficient revenue and has not needed external capital (e.g. "Profitable and self-sustaining — no external funding raised")
+- Already acquired: company was bought before or instead of raising externally (e.g. "Acquired by [Parent Co.] in [year] — no independent funding raised")
+- Publicly traded / IPO'd: describe the IPO instead (e.g. "IPO'd on [exchange] in [year] at [valuation or share price if known]")
+- Subsidiary or division: part of a larger parent company (e.g. "Subsidiary of [Parent Co.] — no independent funding history")
+NEVER return an empty string for growth.
 
 For each input company domain, return exactly one entry in companies[] with:
 - domain: the exact domain provided (lowercase, no www.)
-- growth: the round series and amount raised (e.g. "Series B, $50M" or "Seed, $2M"). If no funding information exists after a thorough search, return the literal string "No funding information found" — NEVER return an empty string.
-- timeframe: the date or period of the announcement (e.g. "March 2024" or "Q1 2024"). Return "" only when growth is "No funding information found".
-- evidence: the source URL of the announcement. Return "" only when growth is "No funding information found".
+- growth: the round series and amount raised (e.g. "Series B, $50M" or "Seed, $2M"), OR a one-sentence explanation of why no external funding exists (see above). NEVER return an empty string.
+- timeframe: the date or period of the announcement (e.g. "March 2024" or "Q1 2024"). Return "" when no funding round was found.
+- evidence: the source URL of the announcement. Return "" when no funding round was found.
 
 Always include every requested domain in the companies array.`;
 
@@ -455,9 +463,9 @@ export async function revenueGrowthExaSearch(domains: string[]): Promise<ExaSear
   });
 }
 
-const SYSTEM_PROMPT_NUMBER_OF_USERS = `Research the total number of users, customers, or accounts for the companies. Return "unknown" when direct evidence is not available — do not estimate from funding stage, employee headcount, or web traffic alone.
+const SYSTEM_PROMPT_NUMBER_OF_USERS = `Research the total number of users, customers, or accounts for the companies. Prioritize the most recent count; if current data is unavailable, report the most recently known historical count with its date; if no disclosed count exists at all, infer from proxy signals. Use the "unknown" bucket only as a last resort when all three approaches yield nothing — and even then, describe what you tried in user_count. NEVER write "unknown", "no user count found", or any similar no-data string as the user_count value.
 
-STEP 1 — Search for directly disclosed counts.
+STEP 1 — Search for a directly disclosed current count.
 Accepted evidence:
 - Official sources: press releases, blog posts, earnings calls, SEC filings, S-1s, founder interviews, company homepage claims ("trusted by 10,000 teams"), verified news articles
 - G2 / Trustpilot review counts: multiply by 50–100x as a low-confidence proxy for actual customers
@@ -465,31 +473,39 @@ Accepted evidence:
 - ARR ÷ ACV only when BOTH values are explicitly stated in the same public source (e.g. "$20M ARR" and "$5K ACV" both cited → ~4,000 customers)
 - Third-party estimates from Sacra, Growjo, Latka, CB Insights, or PitchBook
 
-NOT acceptable as primary evidence:
-- Funding stage benchmarks alone (e.g. "Series B typically has 500–5,000 customers" is speculation, not evidence)
-- Employee headcount × ratio estimates
-- Web traffic / SimilarWeb data alone
+STEP 2 — If no current count is found, search for the most recent historical count.
+Look in older blog posts, press releases, archived pages, and dated articles. Report the best count found and include the source date. Use a "~" prefix and note the date to signal it may be outdated (e.g. "~200K users (as of 2022 blog post)"). Do not skip this step — always attempt it before inferring.
 
-STEP 2 — Assign a bucket based only on what you found.
+STEP 3 — If no disclosed count (current or historical) exists, infer from proxy signals as a last resort.
+Use any combination of:
+- Funding stage and valuation (late-stage rounds imply larger user bases)
+- Headcount × typical users-per-employee ratios for the business model
+- App downloads, DAU/MAU, store rankings (data.ai, Sensor Tower)
+- Web traffic trends from SimilarWeb
+- Customer logo count × typical ACV
+- Third-party estimates from Sacra, Growjo, Latka
+Express inferred counts with "~" and "(estimated)" and explain the signals in the reasoning field (e.g. "~50K users (estimated from 200 employee headcount × SaaS B2B ratio)").
+
+STEP 4 — Assign a bucket based on whatever was found in Steps 1–3.
 Pick the single best-fit bucket:
 - "<100" — evidence shows fewer than 100 users/customers
 - "100–1K" — evidence points to 100–1,000
 - "1K–10K" — evidence points to 1,000–10,000
 - "10K–100K" — evidence points to 10,000–100,000
 - "100K+" — evidence points to 100,000 or more
-- "unknown" — no direct evidence found; do not guess
+- "unknown" — genuinely zero evidence across all three steps; use only as a last resort
 
-STEP 3 — Confidence calibration:
+STEP 5 — Confidence calibration:
 - "high" — direct count from official source within last 12 months
-- "medium" — credible third-party estimate (Sacra, Growjo, Latka) or ARR÷ACV with both numbers explicitly disclosed
-- "low" — G2 review count multiplied; indirect or dated evidence; or bucket is "unknown"
+- "medium" — credible third-party estimate (Sacra, Growjo, Latka), ARR÷ACV with both values explicitly disclosed, or official historical count older than 12 months
+- "low" — G2 review count multiplied; inferred from proxy signals; or bucket is "unknown"
 
 For each input company domain, return exactly one entry in companies[] with:
 - domain: the exact domain provided (lowercase, no www.)
-- user_count: human-readable description of what was found (e.g. "~500K MAU per 2024 blog post", "unknown")
+- user_count: human-readable description of what was found or estimated (e.g. "~500K MAU per 2024 blog post", "~200K users (as of 2022 press release)", "~50K (estimated from proxy signals)"). NEVER write "unknown", "no user count found", or any equivalent — always describe the count or the best inference.
 - user_count_bucket: one of "<100", "100–1K", "1K–10K", "10K–100K", "100K+", "unknown"
-- reasoning: 1–3 sentences on what evidence was found, or why it is unknown
-- source_link: URL of the strongest source used, or "" when unknown
+- reasoning: 1–3 sentences on what evidence was found and how the estimate was reached
+- source_link: URL of the strongest source used, or "" when only inference was used
 - source_date: publication date in ISO 8601 or approximate form, or "" when unknown
 - confidence: "high", "medium", or "low"
 
