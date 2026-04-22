@@ -423,6 +423,92 @@ describe('input routing', () => {
     expect(identityWriteArg['LinkedIn Page']).toBe('https://linkedin.com/company/acme');
     expect(identityWriteArg['Description']).toBe('A SaaS company');
   });
+
+  it('writes Account Purpose for CSV rows when --account-purpose is set, even when all other identity columns are already filled', async () => {
+    const csvPath = await makeCsv(tmpDir, [
+      {
+        'Company Name': 'Acme Corp',
+        Website: 'acme.com',
+        'Company Linkedin Url': 'https://linkedin.com/company/acme',
+        'Short Description': 'A SaaS company',
+      },
+    ]);
+    // All identity columns already filled — without accountPurpose, toWrite would be empty and no upsert fires.
+    m.fetchAllRecords.mockResolvedValue(
+      new Map([
+        [
+          'acme.com',
+          {
+            company_name: 'Acme Corp',
+            domain: 'acme.com',
+            linkedin_page: 'https://linkedin.com/company/acme',
+            description: 'A SaaS company',
+            website: 'acme.com',
+            competitor_tooling: 'Not using any competitor tools',
+            digital_native: 'Digital-native B2B\n\nConfidence: High\n\nReasoning: test',
+            number_of_users: 'User count: 5M MAU\n\nUser count bucket: 100K+\n\nConfidence: medium',
+            observability_tool: 'Datadog: https://example.com',
+            communication_tool: 'Slack: https://example.com',
+            cloud_tool: 'AWS: https://example.com',
+            funding_growth: 'Growth: Series B',
+            revenue_growth: 'Growth: ~$15M ARR\n\nConfidence: medium',
+            number_of_engineers: '10',
+            number_of_sres: '3\n\nhttps://linkedin.com/in/joe',
+            engineer_hiring: '2\n\nSoftware Engineer: https://jobs.example.com/1',
+            sre_hiring: '0',
+            customer_complains_on_x: 'Full outage: 0\nPartial outage: 0\nPerformance degradation: 0\nUnclear: 0',
+            recent_incidents_official: 'No status page found',
+            ai_adoption_mindset: 'Classification: Neutral\nConfidence: Low',
+            ai_sre_maturity: 'Classification: ideating\nConfidence: Low\nSales signal: High potential',
+            industry: 'industry: SaaS (B2B)\nreason: B2B software',
+          },
+        ],
+      ])
+    );
+
+    await enrichAll({ csv: csvPath, accountPurpose: 'Q1 ABM' });
+
+    // Account Purpose makes toWrite non-empty even when all other identity columns are already filled,
+    // so the upsert fires. It must appear in at least one upsertByDomain call.
+    expect(m.upsertByDomain).toHaveBeenCalledWith(
+      expect.objectContaining({ 'Account Purpose': 'Q1 ABM' })
+    );
+  });
+
+  it('does not write Account Purpose when --account-purpose is not provided', async () => {
+    const csvPath = await makeCsv(tmpDir, [
+      {
+        'Company Name': 'Acme Corp',
+        Website: 'acme.com',
+        'Company Linkedin Url': '',
+        'Short Description': 'A SaaS company',
+      },
+    ]);
+    m.fetchAllRecords.mockResolvedValue(new Map());
+
+    await enrichAll({ csv: csvPath });
+
+    // None of the upsert calls should include Account Purpose
+    for (const [callArg] of m.upsertByDomain.mock.calls as [Record<string, unknown>][]) {
+      expect(callArg['Account Purpose']).toBeUndefined();
+    }
+  });
+
+  it('does not write Account Purpose to Attio-only records even when --account-purpose is set', async () => {
+    // No CSV rows — the only company in the pipeline is an Attio-only carry-over.
+    const csvPath = await makeCsv(tmpDir, []);
+    m.fetchAllRecords.mockResolvedValue(
+      new Map([['attio-only.com', { company_name: 'Carry Co', domain: 'attio-only.com' }]])
+    );
+    defaultExaMocks(['attio-only.com']);
+
+    await enrichAll({ csv: csvPath, accountPurpose: 'Q1 ABM' });
+
+    // No identity write fires for Attio-only records; Account Purpose must not appear.
+    for (const [callArg] of m.upsertByDomain.mock.calls as [Record<string, unknown>][]) {
+      expect(callArg['Account Purpose']).toBeUndefined();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

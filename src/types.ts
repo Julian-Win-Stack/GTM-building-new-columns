@@ -35,6 +35,7 @@ export type EnrichmentResult = {
   'LinkedIn Page': string;
   'Description': string;
   'Website': string;
+  'Account Purpose': string;
   'Digital Native': string;
   'Cloud Tool': string;
   'Observability Tool': string;

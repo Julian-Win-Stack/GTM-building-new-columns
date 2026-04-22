@@ -418,12 +418,13 @@ Reasoning:
 ```
 Score computed locally: `round1(0.5 × Intent + 0.3 × Context + 0.2 × Tooling)`. Two-step rounding (2dp then 1dp) prevents floating-point drift. Tier buckets: ≥4.5→T1, ≥3.5→T2, ≥2.5→T3, ≥1.5→T4, else T5. Hard override: if Company Context Score = 0, Final Score = 0, Tier 5 (no OpenAI call). OpenAI called only for the reasoning paragraph, using `AZURE_OPENAI_DEPLOYMENT` (non-pro, unlike Stages 18–20). Hash covers only the 3 score inputs via `final_score_change_detection_for_developer`. Eligibility: all 17 base columns + 3 upstream score columns must be non-empty. Runs after Stages 18/19/20 have updated `attioCache` in the same pipeline run.
 
-**Identity columns (Company Name, Domain, LinkedIn Page, Description)** — written once at pipeline start (before Stage 1) for every CSV row, via an "identity-write" step. Rules:
+**Identity columns (Company Name, Domain, LinkedIn Page, Description, Website, Account Purpose)** — written once at pipeline start (before Stage 1) for every CSV row, via an "identity-write" step. Rules:
 - For each CSV row, fill any of the four columns that are currently **empty** in Attio using the CSV value. Never overwrite a non-empty Attio value (preserves human edits).
 - Match the Attio record by `Domain` when the CSV row has a Website, otherwise by `LinkedIn Page` (`upsertCompanyByLinkedInUrl`). Never by Company Name — name-based lookups were removed.
 - `Description` comes from the CSV column `Short Description`.
 - If a CSV row has **neither** a Domain nor a LinkedIn URL, skip the row entirely (no write, not added to the stage processing set).
 - CSV rows with only a LinkedIn URL (no Website) are resolved against the Attio cache via LinkedIn URL lookup to obtain a domain for subsequent stages. If the Attio record doesn't exist yet, the identity-write upserts by `linkedin_page`, but the row will not participate in stages keyed by domain until a future run after Attio assigns a domain.
+- `Account Purpose` is written via `--account-purpose <value>` CLI flag (not from CSV). It always overwrites (no fill-empty guard). Omit the flag to leave the column untouched. Only CSV-sourced rows receive the value — Attio-only carry-over records are not tagged.
 
 Stages 7–17 run on `survivorsAfterStage6` (non-gating). No `filterSurvivors` is called — the company set passes through unchanged. Stages 18, 19, and 20 all operate on `survivorsAfterStage6` with the same precondition (all 17 prior enrichable columns must be non-empty) but are independent of each other — none requires the others to have run first. Stage 21 runs after all three and additionally requires all 3 upstream score columns to be non-empty in `attioCache`.
 
@@ -448,6 +449,7 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 ## Commands
 ```
 npm run enrich-all -- --csv ./data/input.csv --limit 10 --dry-run
+npm run enrich-all -- --csv ./data/input.csv --account-purpose "Q1 2026 ABM"
 npm run enrich-company -- --domain acme.com --dry-run
 npm run enrich-column -- --column "Digital Native" --domain acme.com
 npm run attio-smoke -- --domain kobie.com
@@ -499,7 +501,7 @@ After every build or code change:
 - Never commit `.env` — only `.env.example`
 - `ATTIO_API_KEY` and all other secrets only in `.env`, read via `KEYS` in `config.ts`
 - `ATTIO_OBJECT_SLUG` defaults to `ranked_companies` in code; overridable via `.env`
-- Adding a new **enrichable** Attio column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `apis/attio.ts:FIELD_SLUGS`; for a gating-stage column, also add reason builders to `src/rejectionReasons.ts`. For a **non-enrichable** identity column (CSV-sourced, like `Description`), only `types.ts` (`InputRow` + `EnrichmentResult`) and `apis/attio.ts:FIELD_SLUGS` are needed — it stays out of `EnrichableColumn` / `ENRICHERS`. Also update `pipeline.ts:EnrichmentResult` literal. Note: adding any new upstream enrichable column automatically changes the hash for all companies and triggers a Stage 18 re-score on the next run — this is intentional (new signal → refreshed score). When adding a new score column (Stages 18/19/20/21 style), also update all `.filter()` exclusion clauses in `enrichAll.ts` that exclude score columns from the eligibility hash — all score columns must be excluded from each other's prior-column checks to avoid circular dependency (currently four exclusion filters: one per score stage).
+- Adding a new **enrichable** Attio column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `apis/attio.ts:FIELD_SLUGS`; for a gating-stage column, also add reason builders to `src/rejectionReasons.ts`. For a **non-enrichable** identity column (CSV-sourced, like `Description`), only `types.ts` (`InputRow` + `EnrichmentResult`) and `apis/attio.ts:FIELD_SLUGS` are needed — it stays out of `EnrichableColumn` / `ENRICHERS`. Also update `pipeline.ts:EnrichmentResult` literal. For a **CLI-flag identity column** (like `Account Purpose`): same as non-enrichable (`types.ts:EnrichmentResult` + `apis/attio.ts:FIELD_SLUGS` + `pipeline.ts:EnrichmentResult` literal) plus wire the flag in `src/index.ts`, `EnrichAllOptions` in `enrichAll.ts`, and the identity-write block in `enrichAll.ts`. Note: adding any new upstream enrichable column automatically changes the hash for all companies and triggers a Stage 18 re-score on the next run — this is intentional (new signal → refreshed score). When adding a new score column (Stages 18/19/20/21 style), also update all `.filter()` exclusion clauses in `enrichAll.ts` that exclude score columns from the eligibility hash — all score columns must be excluded from each other's prior-column checks to avoid circular dependency (currently four exclusion filters: one per score stage).
 - Never add business logic decisions (what counts as Digital Native, confidence thresholds, etc.) without asking the user first
 - `toAttioValues` skips empty strings — enrichers must return `''` not `null`/`undefined` to avoid writing blanks to Attio
 - Never call `exa.search` directly — always go through `scheduleExa()`; never call `upsertCompanyByDomain` in a tight loop without the `attioWriteLimit` gate

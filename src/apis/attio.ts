@@ -8,6 +8,7 @@ export const FIELD_SLUGS: Record<string, string> = {
   'LinkedIn Page': 'linkedin_page',
   'Description': 'description',
   'Website': 'website',
+  'Account Purpose': 'account_purpose',
   'Digital Native': 'digital_native',
   'Cloud Tool': 'cloud_tool',
   'Observability Tool': 'observability_tool',

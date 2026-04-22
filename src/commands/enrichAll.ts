@@ -77,6 +77,7 @@ export type EnrichAllOptions = {
   csv?: string;
   limit?: number;
   dryRun?: boolean;
+  accountPurpose?: string;
 };
 
 function splitByCache(
@@ -186,8 +187,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     `[enrich-all] csv=${csvPath} rows=${subset.length} csvCompanies=${csvIdentities.length} badRows=${skippedBadDomain} totalCompanies=${companies.length} (attio-only-included=${attioOnlyIncluded} attio-only-rejected-skipped=${attioOnlyRejected}) dryRun=${!!opts.dryRun}`
   );
 
-  // Identity-write: for each CSV row, fill any of the four identity columns (Name, Domain, LinkedIn Page, Description)
-  // that are currently empty in Attio. Never overwrite non-empty Attio values. Match by domain when available, else by LinkedIn URL.
+  // Identity-write: for each CSV row, fill empty identity columns (Name, Domain, LinkedIn Page, Description, Website) and
+  // always overwrite Account Purpose when --account-purpose is set. Match by domain when available, else by LinkedIn URL.
   if (!opts.dryRun) {
     const identityWrites = csvIdentities
       .map((id) => {
@@ -200,6 +201,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
         if (id.linkedinUrl && !existingValues[linkedinSlug]) toWrite['LinkedIn Page'] = id.linkedinUrl;
         if (id.description && !existingValues[descriptionSlug]) toWrite['Description'] = id.description;
         if (id.website && !existingValues[websiteSlug]) toWrite['Website'] = id.website;
+        if (opts.accountPurpose) toWrite['Account Purpose'] = opts.accountPurpose;
         return { id, toWrite };
       })
       .filter(({ toWrite }) => Object.keys(toWrite).length > 0);

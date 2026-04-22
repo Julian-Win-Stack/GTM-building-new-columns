@@ -28,6 +28,8 @@ export async function runPipeline(
     'Domain': input.domain,
     'LinkedIn Page': row['Company Linkedin Url'] ?? '',
     'Description': row['Short Description'] ?? '',
+    'Website': row['Website'] ?? '',
+    'Account Purpose': '',
     'Digital Native': values['Digital Native'] ?? '',
     'Cloud Tool': values['Cloud Tool'] ?? '',
     'Observability Tool': values['Observability Tool'] ?? '',

@@ -16,6 +16,7 @@ program
   .option('--csv <path>', 'path to input CSV (default: ./data/input.csv)')
   .option('--limit <n>', 'process only the first N rows', (v) => parseInt(v, 10))
   .option('--dry-run', 'show what would be created/updated without calling any APIs')
+  .option('--account-purpose <value>', 'tag every CSV-sourced row written this run with this value (Account Purpose column); omit to leave the column untouched')
   .action(async (opts) => {
     await enrichAll(opts);
   });
