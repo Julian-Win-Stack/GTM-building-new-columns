@@ -90,7 +90,7 @@ Tunables in `.env`:
 - `EXA_RETRY_BASE_MS` (default 1000)
 - `ATTIO_WRITE_CONCURRENCY` (default 5) — max in-flight Attio upserts
 - `OPENAI_CONCURRENCY` (default 5) — max concurrent Azure OpenAI calls (LinkedIn profile verification)
-- `THEIRSTACK_QPS` (default 4) — TheirStack calls per second (free plan = 300 RPM ≈ 5 QPS)
+- `THEIRSTACK_QPS` (default 3.5) — TheirStack calls per second (free plan = 300 RPM ≈ 5 QPS)
 - `THEIRSTACK_RETRY_TRIES` (default 3)
 - `THEIRSTACK_RETRY_BASE_MS` (default 1000)
 - `APOLLO_QPS` (default 3) — Apollo calls per second (paid plan = 200/min = 3.33 QPS; hourly cap = 6000/hr)
@@ -507,14 +507,7 @@ After every build or code change:
 - Do not add E2E scenarios that duplicate unit-test coverage. Before adding one, confirm the logic is not already tested by a stage `.test.ts`, `filterSurvivors.test.ts`, `runStage.test.ts`, or `writeStageColumn.test.ts`.
 
 ## Keep this CLAUDE.md current
-Update this file in the same change that introduces a new pattern, module, dependency, command, env var, or rule. Do not defer it. Specifically, when you:
-- add a file under `src/` or a new subdirectory → update the Architecture tree
-- add a dependency → update the Stack list
-- add/rename/remove an `npm run` script → update the Commands block
-- introduce a new concurrency/rate-limit pattern, retry policy, or external service → update the relevant section
-- establish a new convention or hard rule → add it to Code Style or Rules
-
-Keep entries terse. Remove stale entries rather than leaving them. Do not add changelog-style dated entries — this file describes current state; git log is for history.
+Update in the same change that introduces a new pattern, module, dependency, command, env var, or rule. Keep entries terse; remove stale ones; no changelog-style dated entries.
 
 ## Compaction
 When compacting, always preserve: list of modified files, any failing typecheck errors, which enricher columns have real implementations vs stubs, and which stages are wired into enrich-all vs still pending.
