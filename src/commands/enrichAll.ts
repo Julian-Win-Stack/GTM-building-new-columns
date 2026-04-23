@@ -759,14 +759,34 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
 
   // Stage 16 — AI SRE Maturity (non-gating, data collection only)
   const stage16Slug = FIELD_SLUGS['AI SRE maturity']!;
+  const competitorToolingSlug = FIELD_SLUGS['Competitor Tooling']!;
   const { todo: stage16Todo, done: stage16Done } = splitByCache(survivorsAfterStage6, attioCache, stage16Slug);
-  console.log(`[aiSreMaturity] todo=${stage16Todo.length} skipped=${stage16Done.length}`);
 
-  const companyNameByDomain16 = new Map(stage16Todo.map((c) => [c.domain, c.companyName]));
+  // Companies already using a competitor tool: copy Competitor Tooling value directly, skip Exa
+  const stage16ExaTodo: typeof stage16Todo = [];
+  for (const company of stage16Todo) {
+    const competitorValue = attioCache.get(company.domain)?.[competitorToolingSlug] ?? '';
+    if (competitorValue && competitorValue !== 'Not using any competitor tools') {
+      const newlineIdx = competitorValue.indexOf('\n');
+      const toolNames = newlineIdx === -1 ? competitorValue : competitorValue.slice(0, newlineIdx);
+      const rest = newlineIdx === -1 ? '' : competitorValue.slice(newlineIdx);
+      const sreMaturityValue = `Working with vendor: ${toolNames}${rest}`;
+      await writeStageColumn('AI SRE maturity', [{ company, data: { text: sreMaturityValue } as unknown as AiSreMaturityData }], () => sreMaturityValue);
+      const existing = attioCache.get(company.domain) ?? {};
+      attioCache.set(company.domain, { ...existing, [stage16Slug]: sreMaturityValue });
+      console.log(`[aiSreMaturity] ${company.domain}: competitor detected, copied Competitor Tooling value`);
+    } else {
+      stage16ExaTodo.push(company);
+    }
+  }
+
+  console.log(`[aiSreMaturity] exa=${stage16ExaTodo.length} competitor-shortcut=${stage16Todo.length - stage16ExaTodo.length} skipped=${stage16Done.length}`);
+
+  const companyNameByDomain16 = new Map(stage16ExaTodo.map((c) => [c.domain, c.companyName]));
 
   await runStage<ExaSearchResponse, AiSreMaturityData>({
     name: 'aiSreMaturity',
-    companies: stage16Todo,
+    companies: stage16ExaTodo,
     batchSize: 1,
     retry: { tries: EXA_RETRY_TRIES, baseMs: EXA_RETRY_BASE_MS },
     call: (domains) => {

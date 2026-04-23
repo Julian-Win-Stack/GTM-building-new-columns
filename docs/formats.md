@@ -217,6 +217,8 @@ Reasoning:
 ```
 Per-company (batchSize: 1). Company-specific query + systemPrompt. No link validation. Operates independently of Stage 15.
 
+**Shortcut path:** when Competitor Tooling is non-empty and not `Not using any competitor tools`, Stage 16 skips Exa entirely and writes `Working with vendor: <tool names>\n\n<evidence lines from Stage 1>` to AI SRE maturity. Stage 20 (Intent Signal Score) maps this to its "working with vendor" pattern.
+
 ---
 
 ### Industry (Stage 17)

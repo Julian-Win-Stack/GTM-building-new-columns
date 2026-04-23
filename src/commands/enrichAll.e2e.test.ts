@@ -601,7 +601,68 @@ describe('happy path', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 5 — Rejection propagation
+// Group 5 — Stage 16 competitor shortcut
+// ---------------------------------------------------------------------------
+describe('Stage 16 competitor shortcut', () => {
+  it('skips Exa and writes "Working with vendor:" prefix when Competitor Tooling is non-empty', async () => {
+    const csvPath = await makeCsv(tmpDir, [
+      {
+        'Company Name': 'Acme',
+        Website: 'acme.com',
+        'Company Linkedin Url': 'https://linkedin.com/company/acme',
+        'Short Description': 'SaaS platform',
+      },
+    ]);
+
+    // All stage columns pre-populated except ai_sre_maturity, which is blank so Stage 16 fires.
+    // competitor_tooling has a real competitor hit → shortcut should activate.
+    m.fetchAllRecords.mockResolvedValue(
+      new Map([
+        [
+          'acme.com',
+          {
+            company_name: 'Acme',
+            domain: 'acme.com',
+            linkedin_page: 'https://linkedin.com/company/acme',
+            description: 'SaaS platform',
+            competitor_tooling: 'Rootly\n\nEvidence: (Rootly\'s customer page)',
+            digital_native: 'Digital-native B2B\n\nConfidence: High\n\nReasoning: test',
+            number_of_users: 'User count: 5M MAU\n\nUser count bucket: 100K+\n\nConfidence: medium',
+            observability_tool: 'Datadog: https://example.com',
+            communication_tool: 'Slack: https://example.com',
+            cloud_tool: 'AWS: https://example.com',
+            funding_growth: 'Growth: Series B',
+            revenue_growth: 'Growth: ~$15M ARR\n\nConfidence: medium',
+            number_of_engineers: '10',
+            number_of_sres: '3\n\nhttps://linkedin.com/in/joe',
+            engineer_hiring: '2\n\nSoftware Engineer: https://jobs.example.com/1',
+            sre_hiring: '0',
+            customer_complains_on_x: 'Full outage: 0\nPartial outage: 0\nPerformance degradation: 0\nUnclear: 0',
+            recent_incidents_official: 'No status page found',
+            ai_adoption_mindset: 'Classification: Neutral\nConfidence: Low',
+            ai_sre_maturity: '',
+            industry: 'industry: SaaS (B2B)\nreason: B2B software',
+          },
+        ],
+      ])
+    );
+
+    await enrichAll({ csv: csvPath });
+
+    expect(m.aiSreMaturityExaSearch).not.toHaveBeenCalled();
+
+    const sreMaturityCall = m.upsertByDomain.mock.calls.find(
+      (c: unknown[]) => (c[0] as Record<string, unknown>)?.['AI SRE maturity'] !== undefined
+    );
+    expect(sreMaturityCall).toBeDefined();
+    expect((sreMaturityCall![0] as Record<string, unknown>)['AI SRE maturity']).toBe(
+      "Working with vendor: Rootly\n\nEvidence: (Rootly's customer page)"
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 6 — Rejection propagation
 // ---------------------------------------------------------------------------
 describe('rejection propagation', () => {
   it('Stage 2 rejection stops the company from reaching Stage 3+, writes rejection reason', async () => {

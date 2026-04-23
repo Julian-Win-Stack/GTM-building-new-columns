@@ -97,7 +97,7 @@ Flow: load CSV → pre-fetch ALL Attio records → merge processing set (CSV ∪
 | 13 | Customer complains on X | twitterapi.io + OpenAI | no gate |
 | 14 | Recent incidents ( Official ) | Statuspage v2 | no gate |
 | 15 | AI adoption mindset | Exa | no gate |
-| 16 | AI SRE maturity | Exa | no gate |
+| 16 | AI SRE maturity | Exa (shortcut: skipped when Competitor Tooling is non-empty) | no gate |
 | 17 | Industry | Exa | no gate |
 | 18 | Company Context Score | OpenAI pro | no gate |
 | 19 | Tooling Match Score | OpenAI pro | no gate |
@@ -109,6 +109,7 @@ Flow: load CSV → pre-fetch ALL Attio records → merge processing set (CSV ∪
 - **Stage 1 is not a gating stage** — all companies continue to Stage 2 regardless.
 - **cacheGate:** cached Attio values must also pass the gate. When editing a formatter, update its `cacheGate` in the same change.
 - **Stages 7–17** run on `survivorsAfterStage6` with no filtering.
+- **Stage 16 shortcut:** when Competitor Tooling is non-empty and not `"Not using any competitor tools"`, AI SRE maturity is set to `"Working with vendor: <tools>\n\n<evidence>"` without calling Exa. Blank Competitor Tooling → falls through to Exa as normal.
 - **Stages 11+12** share one Apify call; cache-skip requires both slugs non-empty.
 - **Stages 18/19/20** all operate on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty. Independent of each other.
 - **Stage 21** additionally requires all 3 upstream score columns non-empty; runs after 18/19/20.
