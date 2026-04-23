@@ -139,7 +139,7 @@ npm test
 - All outbound API calls must use their scheduler wrapper: `scheduleExa()`, `scheduleTheirstack()`, `scheduleApollo()`, `scheduleApify()`, `scheduleTwitterApi()`, `scheduleStatuspage()` — never call the underlying client directly
 - Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`)
 - Azure OpenAI deployment for Stages 18/19/20 lives in `KEYS.azureOpenAIDeploymentPro` — never hardcode deployment names in stage files
-- TheirStack response parsing must check both `technology_slugs` and `technology_names` (exact case-insensitive equality)
+- TheirStack response parsing must check both `technology_slugs` and `technology_names` against machine-readable slug strings — both fields return slugs, never human-readable display names
 - No comments unless the WHY is non-obvious
 
 ## Testing

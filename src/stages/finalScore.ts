@@ -61,8 +61,6 @@ export function computeFinalScore(inputs: {
 
 const SYSTEM_PROMPT = `You are given 3 component scores for a company and must write a 2–4 sentence reasoning paragraph explaining how those scores combine into the provided Final Score and Tier. Do not recompute or restate the final score or tier — those are already provided. Only explain the reasoning based on each component score.
 
-If any component score's underlying data is missing or not publicly confirmed, explicitly say: Not publicly confirmed.
-
 Return JSON with a single field:
 - reasoning: a 2–4 sentence paragraph`;
 

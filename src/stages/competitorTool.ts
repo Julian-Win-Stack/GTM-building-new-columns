@@ -69,9 +69,7 @@ export function matchCompetitorTools(companyName: string | undefined): Competito
     }
   }
   return { matchedTools, evidence };
-}
-
-export function detectCompetitorToolsFromTheirStack(job: TheirstackJob): string[] {
+}export function detectCompetitorToolsFromTheirStack(job: TheirstackJob): string[] {
   const slugSet = new Set((job.technology_slugs ?? []).map((s) => s.toLowerCase()));
   const nameSet = new Set((job.technology_names ?? []).map((n) => n.toLowerCase()));
   const detected: string[] = [];
@@ -82,6 +80,8 @@ export function detectCompetitorToolsFromTheirStack(job: TheirstackJob): string[
   }
   return detected;
 }
+
+
 
 export function formatCompetitorToolForAttio(d: CompetitorToolData): string {
   if (d.matchedTools.length === 0) return 'Not using any competitor tools';

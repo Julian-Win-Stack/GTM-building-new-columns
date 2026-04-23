@@ -538,10 +538,10 @@ describe('parseObservabilityToolResponse — TheirStack fallback', () => {
   });
 });
 
-describe('parseObservabilityToolResponse — TheirStack technology_names fallback', () => {
-  it('detects tool via technology_names when technology_slugs is empty', async () => {
+describe('parseObservabilityToolResponse — TheirStack technology_names slug matching', () => {
+  it('detects tool via technology_names slug when technology_slugs is empty', async () => {
     mockTheirStack.mockResolvedValueOnce({
-      data: [{ source_url: 'https://jobs.ts.com/1', technology_slugs: [], technology_names: ['Datadog'] }],
+      data: [{ source_url: 'https://jobs.ts.com/1', technology_slugs: [], technology_names: ['datadog'] }],
     });
     const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
     const results = await parseObservabilityToolResponse(raw, [co1]);
@@ -550,9 +550,9 @@ describe('parseObservabilityToolResponse — TheirStack technology_names fallbac
     expect(names).toContain('Datadog');
   });
 
-  it('is case-insensitive for technology_names', async () => {
+  it('detects tool via technology_names slug', async () => {
     mockTheirStack.mockResolvedValueOnce({
-      data: [{ source_url: 'https://jobs.ts.com/1', technology_names: ['GRAFANA'] }],
+      data: [{ source_url: 'https://jobs.ts.com/1', technology_names: ['grafana'] }],
     });
     const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });
     const results = await parseObservabilityToolResponse(raw, [co1]);
@@ -563,7 +563,7 @@ describe('parseObservabilityToolResponse — TheirStack technology_names fallbac
   it('does not match when slug absent from both technology_slugs and technology_names', async () => {
     mockTheirStack
       .mockResolvedValueOnce({
-        data: [{ source_url: 'https://jobs.ts.com/1', technology_slugs: [], technology_names: ['Splunk'] }],
+        data: [{ source_url: 'https://jobs.ts.com/1', technology_slugs: [], technology_names: ['splunk'] }],
       })
       .mockResolvedValueOnce({ data: [] });
     const raw = makeRaw({ companies: [{ domain: 'quizlet.com', toolsText: '' }] });

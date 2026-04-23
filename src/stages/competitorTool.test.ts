@@ -42,9 +42,9 @@ describe('detectCompetitorToolsFromTheirStack', () => {
     expect(detectCompetitorToolsFromTheirStack({ technology_slugs: ['rootly-slack'] })).toEqual(['Rootly']);
   });
 
-  it('detects via technology_names (case-insensitive)', () => {
-    expect(detectCompetitorToolsFromTheirStack({ technology_names: ['Komodor'] })).toEqual(['Komodor']);
-    expect(detectCompetitorToolsFromTheirStack({ technology_names: ['MEZMO'] })).toEqual(['Mezmo']);
+  it('detects via technology_names using machine-readable slugs', () => {
+    expect(detectCompetitorToolsFromTheirStack({ technology_names: ['komodor'] })).toEqual(['Komodor']);
+    expect(detectCompetitorToolsFromTheirStack({ technology_names: ['mezmo'] })).toEqual(['Mezmo']);
     expect(detectCompetitorToolsFromTheirStack({ technology_names: ['rootly-slack'] })).toEqual(['Rootly']);
   });
 

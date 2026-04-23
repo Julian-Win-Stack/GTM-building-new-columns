@@ -70,7 +70,7 @@ export function parseToolingMatchResponse(raw: RawToolingMatchResponse): Tooling
   };
 }
 
-const SYSTEM_PROMPT = `You are evaluating a company's tooling stack for Bacca.ai, an AI SRE startup. Score the company across the 4 categories below, then return structured JSON.
+const SYSTEM_PROMPT = `You are evaluating a company's tooling stack for Bacca.ai, an AI SRE (Site Reliability Engineering) startup. Score the company across the 4 categories below, then return structured JSON.
 
 Use the evidence from the company's enrichment data provided. If a category has no evidence, apply the "else" rule and write "Not publicly confirmed" in that justification field.
 

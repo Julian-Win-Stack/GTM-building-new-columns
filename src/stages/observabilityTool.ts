@@ -29,8 +29,7 @@ You will be given the scraped text of a LinkedIn profile page, a target company 
 Rules:
 - Respond "yes" only if the tool is clearly mentioned in a job experience block that belongs to the target company.
 - Respond "no" if the tool appears under a different employer's experience block, or if you cannot clearly attribute it to the target company.
-- Respond "no" if the profile text is empty, garbled, or shows a login wall.
-- When in doubt, respond "no".`;
+- Respond "no" if the profile text is empty, garbled, or shows a login wall.`;
 
 const LINKEDIN_VERIFIER_SCHEMA = {
   name: 'linkedin_tool_verification',
