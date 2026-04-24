@@ -317,7 +317,7 @@ describe('input routing', () => {
     );
     defaultExaMocks(['acme.com']);
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     // Domain resolved → Stage 2 (digitalNative) called for acme.com
     expect(m.digitalNativeExaSearch).toHaveBeenCalled();
@@ -337,7 +337,7 @@ describe('input routing', () => {
     // Attio cache has no matching record
     m.fetchAllRecords.mockResolvedValue(new Map());
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     // Identity write goes through upsertByLinkedIn
     expect(m.upsertByLinkedIn).toHaveBeenCalledWith(
@@ -391,7 +391,7 @@ describe('input routing', () => {
       ])
     );
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     // With all 17 stage columns cached, Stages 18/19/20/21 fire (no hashes stored yet)
     // plus the identity write = 5 total upsertByDomain calls.
@@ -447,7 +447,7 @@ describe('input routing', () => {
       ])
     );
 
-    await enrichAll({ csv: csvPath, accountPurpose: 'Q1 ABM' });
+    await enrichAll({ csv: csvPath, accountPurpose: 'Q1 ABM', skipConfirm: true });
 
     // Account Purpose makes toWrite non-empty even when all other identity columns are already filled,
     // so the upsert fires. It must appear in at least one upsertByDomain call.
@@ -467,7 +467,7 @@ describe('input routing', () => {
     ]);
     m.fetchAllRecords.mockResolvedValue(new Map());
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     // None of the upsert calls should include Account Purpose
     for (const [callArg] of m.upsertByDomain.mock.calls as [Record<string, unknown>][]) {
@@ -483,7 +483,7 @@ describe('input routing', () => {
     );
     defaultExaMocks(['attio-only.com']);
 
-    await enrichAll({ csv: csvPath, accountPurpose: 'Q1 ABM' });
+    await enrichAll({ csv: csvPath, accountPurpose: 'Q1 ABM', skipConfirm: true });
 
     // No identity write fires for Attio-only records; Account Purpose must not appear.
     for (const [callArg] of m.upsertByDomain.mock.calls as [Record<string, unknown>][]) {
@@ -509,7 +509,7 @@ describe('csv-attio merge', () => {
     );
     defaultExaMocks(['attio-only.com']);
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     expect(m.digitalNativeExaSearch).toHaveBeenCalled();
     const [[domains]] = m.digitalNativeExaSearch.mock.calls as [[string[]]];
@@ -532,7 +532,7 @@ describe('happy path', () => {
     ]);
     defaultExaMocks(['acme.com']);
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     // All 17 stage columns + identity columns must have been written via upsertByDomain
     const allColumnArgs = m.upsertByDomain.mock.calls.flatMap(
@@ -628,7 +628,7 @@ describe('Stage 16 competitor shortcut', () => {
       ])
     );
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     expect(m.aiSreMaturityExaSearch).not.toHaveBeenCalled();
 
@@ -664,7 +664,7 @@ describe('rejection propagation', () => {
       ])
     );
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     // Rejection reason written
     const rejectionCall = m.upsertByDomain.mock.calls.find(
@@ -704,7 +704,7 @@ describe('cache-gate', () => {
       ])
     );
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     // Fresh Exa NOT called (already cached)
     expect(m.digitalNativeExaSearch).not.toHaveBeenCalled();
@@ -811,7 +811,7 @@ describe('Stage 3 conditional gate', () => {
       m.aiAdoptionMindsetExaSearch.mockResolvedValue(makeExaTextResponse('Classification: Neutral\nConfidence: Low'));
       m.aiSreMaturityExaSearch.mockResolvedValue(makeExaTextResponse('Classification: ideating\nConfidence: Low\nSales signal: High potential'));
 
-      await enrichAll({ csv: csvPath });
+      await enrichAll({ csv: csvPath, skipConfirm: true });
 
       const allArgs = m.upsertByDomain.mock.calls.flatMap(
         (c: unknown[]) => Object.keys((c[0] as Record<string, unknown>) ?? {})
@@ -845,7 +845,7 @@ describe('Stage 10 N/A branch', () => {
     ]);
     defaultExaMocks(['no-li.com']);
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     // Apify harvest should NOT be called
     expect(m.runHarvestLinkedInEmployees).not.toHaveBeenCalled();
@@ -886,7 +886,7 @@ describe('Stage 11+12 union-skip', () => {
     );
     defaultExaMocks(['half.com']);
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     // Apify job listings should be called because SRE Hiring was missing
     expect(m.runCareerSiteJobListings).toHaveBeenCalled();
@@ -949,7 +949,7 @@ describe('Stage 18 hash-gate', () => {
       ])
     );
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     const scoreCall = m.upsertByDomain.mock.calls.find(
       (c: unknown[]) => (c[0] as Record<string, unknown>)?.['Company Context Score'] !== undefined
@@ -978,7 +978,7 @@ describe('Stage 18 hash-gate', () => {
       ])
     );
 
-    await enrichAll({ csv: csvPath });
+    await enrichAll({ csv: csvPath, skipConfirm: true });
 
     const stage18JudgeCalls = (m.judge.mock.calls as Array<[{ schema?: { name?: string } }]>).filter(
       ([args]) => args.schema?.name === 'company_context_score'

@@ -77,6 +77,9 @@ export type EnrichAllOptions = {
   csv?: string;
   limit?: number;
   accountPurpose?: string;
+  // Internal: tests set this to skip the 3-second pre-run countdown so the suite stays fast.
+  // Not exposed as a CLI flag; the wrapper script and src/index.ts never set it.
+  skipConfirm?: boolean;
 };
 
 function splitByCache(
@@ -109,7 +112,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const csvIdentities: CsvIdentity[] = [];
   const companies: StageCompany[] = [];
   const linkedinByDomain = new Map<string, string>();
-  let skippedBadDomain = 0;
+  const skippedRows: Array<{ name: string }> = [];
 
   const pendingLinkedInOnly: CsvIdentity[] = [];
   for (const raw of subset) {
@@ -121,8 +124,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     const description = row['Short Description'] ?? '';
 
     if (!domain && !linkedinUrl) {
-      skippedBadDomain++;
-      console.error(`[fail] ${name || '(unknown)'}: no domain and no LinkedIn URL in CSV — skipping`);
+      skippedRows.push({ name: name || '(unknown)' });
       continue;
     }
 
@@ -134,6 +136,33 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     } else {
       pendingLinkedInOnly.push(identity);
     }
+  }
+
+  const skippedBadDomain = skippedRows.length;
+
+  // Preflight: surface skip decisions before any Attio writes so the user can Ctrl-C.
+  console.log(`[enrich] CSV: ${csvPath}`);
+  console.log(`[enrich] Account purpose: ${opts.accountPurpose ? `"${opts.accountPurpose}"` : '(none — Account Purpose column will not be touched)'}`);
+  console.log(`[enrich] Limit: ${opts.limit ? `${opts.limit} ${opts.limit === 1 ? 'row' : 'rows'}` : 'none (process all rows)'}`);
+  console.log();
+  console.log(`[preflight] Scanned ${subset.length} ${subset.length === 1 ? 'row' : 'rows'} in CSV.`);
+  if (skippedRows.length === 0) {
+    console.log(`[preflight] Every company in the CSV looks good — nothing will be skipped.`);
+  } else {
+    console.log(`[preflight] ${skippedRows.length} ${skippedRows.length === 1 ? 'row' : 'rows'} will be skipped (no Website and no LinkedIn URL):`);
+    for (const s of skippedRows) console.log(`  - "${s.name}"`);
+    const usableCount = subset.length - skippedRows.length;
+    console.log(`[preflight] ${usableCount} ${usableCount === 1 ? 'company' : 'companies'} from CSV will be processed.`);
+  }
+  console.log();
+
+  if (!opts.skipConfirm) {
+    console.log(`[enrich] Starting in 3 seconds — Ctrl-C to abort`);
+    for (const i of [3, 2, 1]) {
+      process.stdout.write(`${i}... `);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    console.log();
   }
 
   console.log(`[enrich-all] pre-fetching Attio records…`);

@@ -16,8 +16,9 @@
 
 ## Architecture
 ```
+enrich                   — bash wrapper around npm run enrich-all (the primary way humans run this)
 src/
-  index.ts               — CLI entry; registers all commands
+  index.ts               — CLI entry; registers the enrich-all command
   config.ts              — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, all API tunable env vars (single source of truth)
   types.ts               — EnrichableColumn, EnrichmentResult, InputRow, EnricherFn, AttioRecord
   rateLimit.ts           — scheduleExa/Theirstack/Apollo/Apify/TwitterApi/Statuspage + attioWriteLimit/openaiLimit
@@ -111,14 +112,26 @@ Flow: load CSV → pre-fetch ALL Attio records → merge processing set (CSV ∪
 - **Stages 18/19/20** all operate on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty. Independent of each other.
 - **Stage 21** additionally requires all 3 upstream score columns non-empty; runs after 18/19/20.
 - **Identity-write** runs before Stage 1: fills empty Attio columns from CSV (never overwrites). Match by Domain, then LinkedIn URL. Skip rows with neither.
+- **Preflight** runs before identity-write: scans the CSV (after `--limit` is applied), reports rows that will be skipped (no Website AND no LinkedIn URL), then waits 3 seconds for Ctrl-C before any Attio writes happen. Tests bypass via the internal `skipConfirm` option.
 
 See `docs/formats.md` for per-column Attio value formats, hash-gating details, and API mapping.
 
 ## Commands
+Primary entrypoint:
 ```
-npm run enrich-all -- --csv ./data/input.csv
-npm run enrich-all -- --csv ./data/input.csv --limit 10
-npm run enrich-all -- --csv ./data/input.csv --account-purpose "Q1 2026 ABM"
+./enrich                                # process every row in ./data/input.csv
+./enrich "Q1 2026 ABM"                  # tag every CSV-sourced row with this Account Purpose
+./enrich --limit 5                      # 5-row test run
+./enrich "Q1 2026 ABM" --limit 5
+```
+
+Underlying npm command (escape hatch — custom CSV path, scripted invocation, etc.):
+```
+npm run enrich-all -- --csv <path> [--limit N] [--account-purpose "..."]
+```
+
+Dev:
+```
 npm run typecheck
 npm run build
 npm test

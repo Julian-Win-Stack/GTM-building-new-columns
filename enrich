@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CSV="./data/input.csv"
+PURPOSE=""
+LIMIT=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --limit)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --limit needs a number, e.g. --limit 5" >&2
+        exit 1
+      fi
+      LIMIT="$2"
+      shift 2
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: ./enrich [purpose] [--limit N]
+
+Arguments:
+  purpose     optional Account Purpose tag for every CSV-sourced row
+              (quote it if it contains spaces)
+  --limit N   optional row cap for test runs
+
+Examples:
+  ./enrich
+  ./enrich "Q1 2026 ABM"
+  ./enrich --limit 5
+  ./enrich "Q1 2026 ABM" --limit 5
+EOF
+      exit 0
+      ;;
+    *)
+      if [[ -z "$PURPOSE" ]]; then
+        PURPOSE="$1"
+        shift
+      else
+        echo "Unexpected argument: $1" >&2
+        echo "Usage: ./enrich [purpose] [--limit N]" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+if [[ ! -f "$CSV" ]]; then
+  echo "Error: $CSV not found. Put your input CSV at $CSV and try again." >&2
+  exit 1
+fi
+
+ARGS=(--csv "$CSV")
+[[ -n "$PURPOSE" ]] && ARGS+=(--account-purpose "$PURPOSE")
+[[ -n "$LIMIT" ]] && ARGS+=(--limit "$LIMIT")
+
+exec npm run --silent enrich-all -- "${ARGS[@]}"
