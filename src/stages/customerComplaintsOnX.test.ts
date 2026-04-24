@@ -114,7 +114,8 @@ describe('parseCustomerComplaintsResponse', () => {
     expect(results[0]!.data.full_outage).toBe(1);
     expect(results[0]!.data.partial_outage).toBe(1);
     const call = vi.mocked(judge).mock.calls[0]![0];
-    expect(call.user).toContain('2 tweets');
+    expect(call.user).toContain('2. "partial"'); // 2 deduped tweets sent
+    expect(call.user).not.toContain('"still down"'); // duplicate was dropped
   });
 
   it('silently drops not_about_company tweets from all counts', async () => {
