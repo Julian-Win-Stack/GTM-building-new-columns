@@ -74,13 +74,13 @@ export async function parseCustomerComplaintsResponse(
   const tweetList = dedupedTweets.map((t, i) => `${i + 1}. "${t.text}"`).join('\n');
   const contextLine = companyContext ? `\nCompany context: ${companyContext}\n` : '';
   const userPrompt =
-    `Here are ${dedupedTweets.length} tweets that may or may not be about ${company.companyName} (${company.domain}) having reliability issues.${contextLine}\n` +
+    `Here are the tweets that may or may not be about ${company.companyName} (${company.domain}) having reliability issues about their digital platform.Here is the information about what the company is:${contextLine}\n` +
     `For each tweet, classify it into ONE of:\n` +
-    `- full_outage: tweet is about ${company.companyName}'s service being completely unreachable\n` +
-    `- partial_outage: tweet is about ${company.companyName}'s service having some features broken, not everything\n` +
-    `- performance_degradation: tweet is about ${company.companyName}'s service being slow, with timeouts, or intermittent failures\n` +
-    `- not_about_company: tweet is not about ${company.companyName} or is not about a reliability issue with their platform\n` +
-    `- unclear: tweet seems to be about ${company.companyName} but cannot determine severity\n\n` +
+    `- full_outage: tweet is about ${company.companyName}'s digital platform being completely unreachable\n` +
+    `- partial_outage: tweet is about ${company.companyName}'s digital platform having some features broken, not everything\n` +
+    `- performance_degradation: tweet is about ${company.companyName}'s digital platform being slow, with timeouts, or intermittent failures\n` +
+    `- not_about_company: tweet is not about ${company.companyName} or is not about a reliability issue with their digital platform\n` +
+    `- unclear: tweet seems to be about ${company.companyName} but cannot determine whether the issue is for their digital platform\n\n` +
     `Return a JSON object with a "categories" array containing one label per tweet, in the same order as the input.\n\n` +
     `Tweets:\n${tweetList}`;
 
