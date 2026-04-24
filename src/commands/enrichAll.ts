@@ -76,7 +76,6 @@ import { attioWriteLimit } from '../rateLimit.js';
 export type EnrichAllOptions = {
   csv?: string;
   limit?: number;
-  dryRun?: boolean;
   accountPurpose?: string;
 };
 
@@ -184,78 +183,42 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     if (li && !linkedinByDomain.has(domain)) linkedinByDomain.set(domain, li);
   }
   console.log(
-    `[enrich-all] csv=${csvPath} rows=${subset.length} csvCompanies=${csvIdentities.length} badRows=${skippedBadDomain} totalCompanies=${companies.length} (attio-only-included=${attioOnlyIncluded} attio-only-rejected-skipped=${attioOnlyRejected}) dryRun=${!!opts.dryRun}`
+    `[enrich-all] csv=${csvPath} rows=${subset.length} csvCompanies=${csvIdentities.length} badRows=${skippedBadDomain} totalCompanies=${companies.length} (attio-only-included=${attioOnlyIncluded} attio-only-rejected-skipped=${attioOnlyRejected})`
   );
 
   // Identity-write: for each CSV row, fill empty identity columns (Name, Domain, LinkedIn Page, Description, Website) and
   // always overwrite Account Purpose when --account-purpose is set. Match by domain when available, else by LinkedIn URL.
-  if (!opts.dryRun) {
-    const identityWrites = csvIdentities
-      .map((id) => {
-        const existingValues: Record<string, string> = id.domain
-          ? attioCache.get(id.domain) ?? {}
-          : byLinkedIn.get(id.linkedinUrl)?.values ?? {};
-        const toWrite: Partial<EnrichmentResult> = {};
-        if (id.name && !existingValues[nameSlug]) toWrite['Company Name'] = id.name;
-        if (id.domain && !existingValues[domainSlug]) toWrite['Domain'] = id.domain;
-        if (id.linkedinUrl && !existingValues[linkedinSlug]) toWrite['LinkedIn Page'] = id.linkedinUrl;
-        if (id.description && !existingValues[descriptionSlug]) toWrite['Description'] = id.description;
-        if (id.website && !existingValues[websiteSlug]) toWrite['Website'] = id.website;
-        if (opts.accountPurpose) toWrite['Account Purpose'] = opts.accountPurpose;
-        return { id, toWrite };
-      })
-      .filter(({ toWrite }) => Object.keys(toWrite).length > 0);
+  const identityWrites = csvIdentities
+    .map((id) => {
+      const existingValues: Record<string, string> = id.domain
+        ? attioCache.get(id.domain) ?? {}
+        : byLinkedIn.get(id.linkedinUrl)?.values ?? {};
+      const toWrite: Partial<EnrichmentResult> = {};
+      if (id.name && !existingValues[nameSlug]) toWrite['Company Name'] = id.name;
+      if (id.domain && !existingValues[domainSlug]) toWrite['Domain'] = id.domain;
+      if (id.linkedinUrl && !existingValues[linkedinSlug]) toWrite['LinkedIn Page'] = id.linkedinUrl;
+      if (id.description && !existingValues[descriptionSlug]) toWrite['Description'] = id.description;
+      if (id.website && !existingValues[websiteSlug]) toWrite['Website'] = id.website;
+      if (opts.accountPurpose) toWrite['Account Purpose'] = opts.accountPurpose;
+      return { id, toWrite };
+    })
+    .filter(({ toWrite }) => Object.keys(toWrite).length > 0);
 
-    if (identityWrites.length > 0) {
-      console.log(`[enrich-all] writing identity columns for ${identityWrites.length} companies…`);
-      await Promise.all(
-        identityWrites.map(({ id, toWrite }) =>
-          attioWriteLimit(() => {
-            const write = id.domain
-              ? upsertCompanyByDomain({ 'Domain': id.domain, ...toWrite })
-              : upsertCompanyByLinkedInUrl({ 'LinkedIn Page': id.linkedinUrl, ...toWrite });
-            return write.catch((err) => {
-              const ref = id.domain || id.linkedinUrl;
-              console.error(`[identity-preflight] failed for ${ref}: ${err instanceof Error ? err.message : String(err)}`);
-            });
-          })
-        )
-      );
-    }
-  }
-
-  if (opts.dryRun) {
-    const { todo: comp, done: compDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Competitor Tooling']!);
-    console.log(`[dry] competitor-tool: todo=${comp.length} skipped=${compDone.length}`);
-    const { todo: dn, done: dnDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Digital Native']!);
-    console.log(`[dry] digital-native: todo=${dn.length} skipped=${dnDone.length}`);
-    for (let i = 0; i < dn.length; i += 2) {
-      const batch = dn.slice(i, i + 2);
-      console.log(`[dry]   batch: ${batch.map((c) => c.domain).join(', ')}`);
-    }
-    const { todo: nou, done: nouDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Number of Users']!);
-    console.log(`[dry] number-of-users (stage 3, conditional B2B gate): todo=${nou.length} skipped=${nouDone.length}`);
-    const { todo: obs, done: obsDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Observability Tool']!);
-    console.log(`[dry] observability-tool: todo=${obs.length} skipped=${obsDone.length}`);
-    const { todo: comm, done: commDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Communication Tool']!);
-    console.log(`[dry] communication-tool: todo=${comm.length} skipped=${commDone.length}`);
-    const { todo: cloud, done: cloudDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Cloud Tool']!);
-    console.log(`[dry] cloud-tool: todo=${cloud.length} skipped=${cloudDone.length}`);
-    const { todo: fg, done: fgDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Funding Growth']!);
-    console.log(`[dry] funding-growth: todo=${fg.length} skipped=${fgDone.length}`);
-    const { todo: rg, done: rgDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Revenue Growth']!);
-    console.log(`[dry] revenue-growth: todo=${rg.length} skipped=${rgDone.length}`);
-    const { todo: cc, done: ccDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Customer complains on X']!);
-    console.log(`[dry] customer-complaints-on-x: todo=${cc.length} skipped=${ccDone.length}`);
-    const { todo: ri, done: riDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Recent incidents ( Official )']!);
-    console.log(`[dry] recent-incidents-official: todo=${ri.length} skipped=${riDone.length}`);
-    const { todo: ind, done: indDone } = splitByCache(companies, attioCache, FIELD_SLUGS['Industry']!);
-    console.log(`[dry] industry: todo=${ind.length} skipped=${indDone.length}`);
-    for (let i = 0; i < ind.length; i += 2) {
-      const batch = ind.slice(i, i + 2);
-      console.log(`[dry]   batch: ${batch.map((c) => c.domain).join(', ')}`);
-    }
-    return;
+  if (identityWrites.length > 0) {
+    console.log(`[enrich-all] writing identity columns for ${identityWrites.length} companies…`);
+    await Promise.all(
+      identityWrites.map(({ id, toWrite }) =>
+        attioWriteLimit(() => {
+          const write = id.domain
+            ? upsertCompanyByDomain({ 'Domain': id.domain, ...toWrite })
+            : upsertCompanyByLinkedInUrl({ 'LinkedIn Page': id.linkedinUrl, ...toWrite });
+          return write.catch((err) => {
+            const ref = id.domain || id.linkedinUrl;
+            console.error(`[identity-preflight] failed for ${ref}: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        })
+      )
+    );
   }
 
   // Stage 1 — Competitor Tool (local match + TheirStack sub-step, no gate)

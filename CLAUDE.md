@@ -40,12 +40,9 @@ src/
     twitterapi.ts        — fetchComplaintTweets (paginated, caps at 50, 90-day window)
     statuspage.ts        — fetchRecentIncidents (probes status.{domain} then {slug}.statuspage.io)
   commands/
-    enrichAll.ts         — stage-wise bulk enrichment
+    enrichAll.ts         — stage-wise bulk enrichment (the only CLI command)
     enrichAll.e2e.test.ts — E2E integration tests (narrow orchestration scope)
     enrichAll.e2e.helpers.ts — makeCsv, makeExaResponse, makeExaTextResponse
-    enrichCompany.ts     — enrich one company by domain
-    enrichColumn.ts      — overwrite one column for one company
-    attioSmoke.ts        — smoke test: upsert Company Name + Domain only
   enrichers/
     index.ts             — ENRICHERS map + ENRICHABLE_COLUMN_LIST
   stages/
@@ -119,11 +116,9 @@ See `docs/formats.md` for per-column Attio value formats, hash-gating details, a
 
 ## Commands
 ```
-npm run enrich-all -- --csv ./data/input.csv --limit 10 --dry-run
+npm run enrich-all -- --csv ./data/input.csv
+npm run enrich-all -- --csv ./data/input.csv --limit 10
 npm run enrich-all -- --csv ./data/input.csv --account-purpose "Q1 2026 ABM"
-npm run enrich-company -- --domain acme.com --dry-run
-npm run enrich-column -- --column "Digital Native" --domain acme.com
-npm run attio-smoke -- --domain kobie.com
 npm run typecheck
 npm run build
 npm test

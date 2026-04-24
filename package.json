@@ -6,9 +6,6 @@
   "main": "src/index.ts",
   "scripts": {
     "enrich-all": "tsx src/index.ts enrich-all",
-    "enrich-company": "tsx src/index.ts enrich-company",
-    "enrich-column": "tsx src/index.ts enrich-column",
-    "attio-smoke": "tsx src/index.ts attio-smoke",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "test": "vitest run"

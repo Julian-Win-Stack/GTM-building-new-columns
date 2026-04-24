@@ -290,26 +290,7 @@ afterAll(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 1 — Dry run
-// ---------------------------------------------------------------------------
-describe('dry-run', () => {
-  it('skips identity writes and stage API calls, returns early', async () => {
-    const csvPath = await makeCsv(tmpDir, [
-      { 'Company Name': 'Acme', Website: 'acme.com', 'Company Linkedin Url': '', 'Short Description': '' },
-    ]);
-    defaultExaMocks(['acme.com']);
-
-    await enrichAll({ csv: csvPath, dryRun: true });
-
-    expect(m.upsertByDomain).not.toHaveBeenCalled();
-    expect(m.upsertByLinkedIn).not.toHaveBeenCalled();
-    expect(m.digitalNativeExaSearch).not.toHaveBeenCalled();
-    expect(m.numberOfUsersExaSearch).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Group 2 — Input routing
+// Group 1 — Input routing
 // ---------------------------------------------------------------------------
 describe('input routing', () => {
   it('resolves LinkedIn-only CSV row domain via Attio cache and runs the pipeline', async () => {
