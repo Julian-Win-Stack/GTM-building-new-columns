@@ -7,17 +7,19 @@ export type CsvRow = {
   Website: string;
   'Company Linkedin Url': string;
   'Short Description': string;
+  'Apollo Account Id': string;
 };
 
 export async function makeCsv(tmpDir: string, rows: Partial<CsvRow>[]): Promise<string> {
   const csvPath = path.join(tmpDir, 'input.csv');
-  const header = 'Company Name,Website,Company Linkedin Url,Short Description';
+  const header = 'Company Name,Website,Company Linkedin Url,Short Description,Apollo Account Id';
   const lines = rows.map((r) =>
     [
       csvEscape(r['Company Name'] ?? ''),
       csvEscape(r['Website'] ?? ''),
       csvEscape(r['Company Linkedin Url'] ?? ''),
       csvEscape(r['Short Description'] ?? ''),
+      csvEscape(r['Apollo Account Id'] ?? ''),
     ].join(',')
   );
   await fsp.writeFile(csvPath, [header, ...lines].join('\n'), 'utf-8');

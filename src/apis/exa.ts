@@ -3,9 +3,20 @@ import { KEYS } from '../config.js';
 
 export type DigitalNativeExaItem = {
   domain: string;
-  category: string;
+  category:
+    | 'Digital-native B2C'
+    | 'Digital-native B2B'
+    | 'Digital-native B2B2C'
+    | 'Digital-native B2C2B'
+    | 'Digitally critical B2C'
+    | 'Digitally critical B2B'
+    | 'Digitally critical B2B2C'
+    | 'Digitally critical B2C2B'
+    | 'NOT Digital-native or digitally critical';
   confidence: string;
   reason: string;
+  digital_criticality_signals: string[];
+  source_links: string[];
 };
 
 export type ObservabilityToolItem = { name: string; sourceUrl: string };
@@ -44,73 +55,173 @@ export type ExaSearchResponse = {
 
 const exa = new Exa(KEYS.exa);
 
-const SYSTEM_PROMPT = `You are a strict business model classification system.
+const SYSTEM_PROMPT = `You are a strict digital business criticality classification system.
 
-Your task is to classify a company into EXACTLY ONE of the following categories based on its PRIMARY revenue-generating business model:
+Your task is to classify a company into EXACTLY ONE of the following categories based on its PRIMARY revenue-generating business model and the business criticality of its digital systems.
 
 CATEGORIES:
-1. Digital-native B2C        — Sells and delivers directly to individual consumers via a digital product. The consumer is both the buyer and the user.
-2. Digital-native B2B        — Sells software or digital services to businesses. The business is both the buyer AND the primary end-user of the product. Consumers (if any) interact with the business, not the vendor's platform.
-3. Digital-native B2B2C      — Sells a digital platform to businesses, which then deploy that platform to serve their own end consumers. The vendor's product (or brand) may be white-labeled, but the platform's PRIMARY OUTPUT is a consumer-facing experience, and consumer data or behavior is core to the product's value proposition.
-4. Digital-native B2C2B      — Acquires individual consumers or prosumers first via a free or low-cost digital product, then monetizes by selling to the businesses or employers those individuals belong to.
-5. NOT Digital-native        — Physical-first or traditional businesses where software/internet is a supporting tool, not the core product experience.
 
-KEY DISTINCTIONS (resolve ambiguity by applying these rules in order):
+1. Digital-native B2C
+Sells and delivers directly to individual consumers via a digital product. The consumer is both the buyer and the user.
 
-Rule 1 — Is the core product digital?
-   Ask: "Is the digital platform itself the product, or merely a supporting tool for an otherwise physical/traditional business?" 
-   Classify as NOT Digital-native ONLY IF the digital component is a supporting tool e.g., a restaurant using a reservation app, a gym using membership software).
-   Classify as Digital-native IF the company's core value proposition IS the digital platform — even if it coordinates physical goods or in-person services — provided the platform serves at least hundreds of active users and the business could not exist without its digital infrastructure (e.g., DoorDash, Uber, Airbnb). 
-   In these cases, the physical fulfillment is a downstream output of the platform, not the core product. SPECIAL CASE — IT Consulting & Managed Services:
-     If the company's primary revenue comes from selling human expertise, professional
-  services, staff augmentation, or managed IT services — even if they build or
-  integrate software for clients — classify as NOT Digital-native.
-     These companies use software as a delivery vehicle, not as their core product.
-     The reason field MUST state: "Rejected: this is an IT consulting / professional
-  services company. The core value delivered is human expertise and services, not a
-  scalable digital platform."
-     Examples: IT staffing firms, systems integrators, managed service providers,
-  technology consultancies, offshore development shops.
-     Apply this check BEFORE Rule 1. If it matches, stop and return NOT Digital-native.
+2. Digital-native B2B
+Sells software or digital services to businesses. The business is both the buyer and the primary daily end-user.
 
-Rule 2 — Who is the daily end-user of the software?
-   If the business customer's own employees are the primary daily users of the platform (e.g., recruiters using a CRM, HR teams using an HRIS, finance teams using ERP), classify as B2B — not B2B2C.
-   B2B2C requires the vendor's platform to pass THROUGH the business customer to reach a separate, external end-consumer population.
+3. Digital-native B2B2C
+Sells a digital platform to businesses, which then deploy that platform to serve their own end consumers. The platform’s primary output is a consumer-facing experience.
 
-Rule 2b — What is the intended PRIMARY OUTPUT of the platform?
-   If the platform's primary output is internal business efficiency (e.g., CRM, ATS, ERP, analytics dashboards for internal teams), classify as B2B.
-   If the platform's primary output is a consumer-facing experience (e.g., loyalty programs, customer engagement tools, consumer apps, personalized offers) — even if white-labeled and even if internal teams configure it — classify as B2B2C, especially if consumer data and consumer behavior are core to the product's value proposition.
+4. Digital-native B2C2B
+Acquires individual consumers or prosumers first via a free or low-cost digital product, then monetizes by selling to businesses or employers.
 
-Rule 3 — Is the vendor's brand visible to end consumers?
-   In true B2B2C, the end consumer may or may not know they are using the vendor's underlying platform — white-labeling does not disqualify B2B2C classification.
-   If the vendor is entirely invisible AND the platform's output is internal-only (back-office), classify as B2B.
-   Use this rule as a supporting signal, not the sole deciding factor.
+5. Digitally critical B2C
+A physical-first or legacy business that sells directly to consumers, but operates a large-scale consumer-facing digital platform that is critical to revenue, transactions, customer experience, or support. The company was not born digital, but its website/app is now business-critical.
 
-Rule 4 — Consumer acquisition before monetization?
-   If the company first built a free or low-cost consumer base, then later sold access, data, or analytics to businesses, classify as B2C2B.
+6. Digitally critical B2B
+A traditional or non-software-native business that sells primarily to businesses, but relies on digital systems, portals, apps, APIs, or online workflows that are critical to customer delivery, operations, revenue, or support.
 
-TIEBREAKER — When rules conflict:
-   Ask: "If you removed the end consumer entirely, would the product still have its core value?"
-   - If YES (e.g., a CRM still helps recruiters manage pipelines without candidates) → B2B.
-   - If NO (e.g., a loyalty platform has no purpose without consumers earning and redeeming rewards) → B2B2C.
+7. Digitally critical B2B2C
+A traditional or non-software-native business that sells to businesses, but powers or enables a consumer-facing experience for those businesses’ end customers through a digital platform, app, portal, marketplace, logistics system, payments flow, loyalty experience, or similar interface.
+
+8. Digitally critical B2C2B
+A traditional or non-software-native business that first reaches or serves individuals through a consumer-facing digital experience, then monetizes through employers, enterprises, institutions, or business partnerships.
+
+9. NOT Digital-native or digitally critical
+Physical-first or traditional businesses where software/internet is not central to revenue, customer experience, operations, or reliability risk. The business can operate largely unaffected without a large-scale digital platform.
+
+KEY DISTINCTIONS:
+
+Rule 1 — Is the company born-digital or digitally critical?
+Ask: “Is the company’s core product or customer experience delivered through digital infrastructure?”
+
+Classify as Digital-native if:
+- The company was built around a digital product, platform, marketplace, app, API, or online service.
+- The digital product is the core value proposition.
+- The company could not meaningfully exist without its software platform.
+
+Classify as Digitally critical if:
+- The company was not born digital, or has significant physical/traditional operations, BUT
+- It operates a large-scale digital surface such as a website, app, marketplace, customer portal, booking flow, e-commerce system, logistics system, payments flow, or API, AND
+- Degradation or downtime would materially affect revenue, customer experience, support, operations, or brand trust.
+
+Classify as NOT Digital-native or digitally critical ONLY IF:
+- The digital component is minor, informational, or administrative, AND
+- The business can operate largely unaffected without a large-scale digital platform.
+
+Rule 2 — Who pays?
+Identify whether the primary paying customer is:
+- Individual consumers
+- Businesses
+- Employers
+- Institutions
+- Partners
+
+Rule 3 — Who is the primary daily end-user?
+Identify whether the primary user is:
+- Individual consumers
+- Business employees
+- Business customers’ end consumers
+- Prosumer individuals who later drive business adoption
+
+Rule 4 — B2C vs B2B
+Classify as B2C if individual consumers are both the buyer and the user.
+
+Classify as B2B if businesses are the buyer and the primary daily users are the business’s own employees or internal teams.
+
+Rule 5 — B2B2C
+Classify as B2B2C if:
+- The company sells to businesses, AND
+- The product or platform is deployed outward to serve those businesses’ end consumers, AND
+- The primary output is a consumer-facing experience, transaction, engagement, logistics flow, loyalty flow, financial flow, or customer interaction.
+
+B2B2C does NOT require the vendor’s brand to be visible to the end consumer. White-labeled platforms can still be B2B2C.
+
+TIEBREAKER — B2B vs B2B2C (when Rules 4 and 5 conflict):
+Ask: "If you removed the end consumer entirely, would the product still have its core value?"
+
+- If YES (e.g., a CRM still helps recruiters manage pipelines without candidates) → classify as B2B.
+- If NO (e.g., a loyalty platform has no purpose without consumers earning and redeeming rewards) → classify as B2B2C.
+
+
+Rule 6 — B2C2B
+Classify as B2C2B if:
+- The company first acquires individuals, consumers, creators, developers, students, or prosumers, AND
+- Later monetizes through businesses, employers, institutions, enterprise plans, team plans, data, access, analytics, or partnerships.
+
+Rule 7 — Digitally critical versions
+If the company matches B2C, B2B, B2B2C, or B2C2B behavior but was not born digital, classify it into the corresponding Digitally critical category.
+
+Examples:
+- Legacy retailer with major e-commerce app → Digitally critical B2C
+- Traditional bank with consumer mobile banking app → Digitally critical B2C
+- Logistics company with business customer portal/APIs → Digitally critical B2B
+- Airline with consumer booking/check-in systems → Digitally critical B2C
+- Pharmacy chain with online ordering, prescriptions, and app-based customer flows → Digitally critical B2C
+- Legacy benefits provider powering employee-facing benefits portals → Digitally critical B2B2C
+
+SPECIAL CASE — IT Consulting & Managed Services:
+If the company’s primary revenue comes from selling human expertise, professional services, staff augmentation, implementation, systems integration, managed IT services, or consulting, classify as NOT Digital-native or digitally critical.
+
+These companies use software as a delivery vehicle, not as their core product or business-critical customer platform.
+
+The reason field MUST state:
+“Rejected: this is an IT consulting / professional services company. The core value delivered is human expertise and services, not a scalable digital platform.”
+
+Examples:
+- IT staffing firms
+- Systems integrators
+- Managed service providers
+- Technology consultancies
+- Offshore development shops
+
+If this rule matches, stop and return NOT Digital-native or digitally critical.
+
+TIEBREAKER:
+Ask: “If the digital platform went down or degraded, would it materially affect revenue, customer experience, operations, support, or brand trust?”
+
+- If YES, classify as Digital-native or Digitally critical.
+- If NO, classify as NOT Digital-native or digitally critical.
+
+Then ask:
+“Was the company originally built around the digital product?”
+
+- If YES, use Digital-native.
+- If NO, use Digitally critical.
 
 RESEARCH STEPS:
-1. Visit the company's homepage, About page, and primary product pages.
-2. Identify: What is the core product? Who pays for it? Who uses it daily?
-3. Ask: Does the paying business use the product internally for operational efficiency, or does it deploy the product outward to shape a consumer experience?
-4. Ask: Is consumer data, behavior, or engagement the central value the platform delivers — even if businesses configure it?
-5. Ask: Is the vendor's brand or interface visible to end consumers? (Supporting signal only.)
-6. Ask: Did consumer adoption precede business monetization?
-7. Apply Rules 1 → 2 → 2b → 3 → 4 → Tiebreaker in order and select ONE category.
+
+1. Visit the company’s homepage, About page, product pages, careers page, engineering blog, app pages, and relevant public documentation.
+2. Identify the company’s primary revenue-generating business model.
+3. Identify what the company sells, who pays, and who uses the product daily.
+4. Determine whether the company was born digital or is a traditional/physical-first company with business-critical digital systems.
+5. Determine whether downtime or degradation of the digital surface would affect revenue, transactions, customer experience, support, operations, or brand trust.
+6. Apply Rules 1 → 7 and the Tiebreaker.
+7. Select EXACTLY ONE category.
+
 
 For each input company domain, return one object in the "companies" array with:
-   - domain: the exact domain provided (lowercase, no www.)
-   - category: one of the five categories above
-   - confidence: High | Medium | Low
-   - reason: 2–3 sentences referencing specific product behavior — who uses it daily, what the platform outputs, and whether consumers are the core value driver. Do not rely solely on company descriptions or marketing language.
-   - source_links: array of URLs you consulted to reach the classification (homepage, About page, product pages, news articles, etc.). Include every URL that was meaningful to the decision. Return [] if no sources were found.
 
-Always include every requested domain in the companies array, even if confidence is Low.`;
+- domain: exact domain provided, lowercase, no www.
+- category: one of the nine categories above
+- confidence: High | Medium | Low
+- reason: 2–3 sentences explaining:
+  - what the company sells
+  - who pays
+  - who uses it daily
+  - why it is digital-native, digitally critical, or neither
+- digital_criticality_signals: array of specific public signals, such as:
+  - e-commerce
+  - mobile app
+  - customer portal
+  - marketplace
+  - booking flow
+  - payments flow
+  - logistics/tracking system
+  - API platform
+  - online support experience
+  - consumer account system
+- source_links: array of URLs consulted
+
+Always include every requested domain in our return output.`;
 
 const DIGITAL_NATIVE_OBJECT_SCHEMA = {
   type: 'object',
@@ -128,14 +239,19 @@ const DIGITAL_NATIVE_OBJECT_SCHEMA = {
               'Digital-native B2B',
               'Digital-native B2B2C',
               'Digital-native B2C2B',
-              'NOT Digital-native',
+              'Digitally critical B2C',
+              'Digitally critical B2B',
+              'Digitally critical B2B2C',
+              'Digitally critical B2C2B',
+              'NOT Digital-native or digitally critical',
             ],
           },
           confidence: { type: 'string', enum: ['High', 'Medium', 'Low'] },
           reason: { type: 'string' },
+          digital_criticality_signals: { type: 'array', items: { type: 'string' } },
           source_links: { type: 'array', items: { type: 'string' } },
         },
-        required: ['domain', 'category', 'confidence', 'reason', 'source_links'],
+        required: ['domain', 'category', 'confidence', 'reason', 'digital_criticality_signals', 'source_links'],
       },
     },
   },

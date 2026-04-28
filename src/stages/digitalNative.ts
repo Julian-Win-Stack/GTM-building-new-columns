@@ -6,12 +6,18 @@ export type DigitalNativeCategory =
   | 'Digital-native B2B'
   | 'Digital-native B2B2C'
   | 'Digital-native B2C2B'
-  | 'NOT Digital-native';
+  | 'Digitally critical B2C'
+  | 'Digitally critical B2B'
+  | 'Digitally critical B2B2C'
+  | 'Digitally critical B2C2B'
+  | 'NOT Digital-native or digitally critical'
+  | 'NOT Digital-native'; // legacy alias for already-stored Attio values
 
 export type DigitalNativeData = {
   category: DigitalNativeCategory;
   confidence: string;
   reason: string;
+  digital_criticality_signals: string[];
   source_links: string[];
 };
 
@@ -20,7 +26,12 @@ const VALID_CATEGORIES: ReadonlySet<string> = new Set([
   'Digital-native B2B',
   'Digital-native B2B2C',
   'Digital-native B2C2B',
-  'NOT Digital-native',
+  'Digitally critical B2C',
+  'Digitally critical B2B',
+  'Digitally critical B2B2C',
+  'Digitally critical B2C2B',
+  'NOT Digital-native or digitally critical',
+  'NOT Digital-native', // legacy alias for already-stored Attio values
 ]);
 
 function normalizeDomain(raw: string): string {
@@ -51,12 +62,16 @@ export function parseDigitalNativeResponse(
     const source_links = Array.isArray(rec['source_links'])
       ? (rec['source_links'] as unknown[]).filter((u): u is string => typeof u === 'string')
       : [];
+    const digital_criticality_signals = Array.isArray(rec['digital_criticality_signals'])
+      ? (rec['digital_criticality_signals'] as unknown[]).filter((s): s is string => typeof s === 'string')
+      : [];
     if (!domainRaw || !category || !confidence || !reason) continue;
     if (!VALID_CATEGORIES.has(category)) continue;
     parsedMap.set(normalizeDomain(domainRaw), {
       category: category as DigitalNativeCategory,
       confidence,
       reason,
+      digital_criticality_signals,
       source_links,
     });
   }
@@ -78,11 +93,19 @@ export function parseDigitalNativeResponse(
   return results;
 }
 
+const REJECTED_CATEGORIES: ReadonlySet<string> = new Set([
+  'NOT Digital-native or digitally critical',
+  'NOT Digital-native', // legacy alias
+]);
+
 export const digitalNativeGate: GateRule<DigitalNativeData> = (d) =>
-  d.category !== 'NOT Digital-native';
+  !REJECTED_CATEGORIES.has(d.category);
 
 export function formatDigitalNativeForAttio(d: DigitalNativeData): string {
   const parts = [`${d.category}`, `Confidence: ${d.confidence}`, `Reasoning: ${d.reason}`];
+  if (d.digital_criticality_signals.length > 0) {
+    parts.push(`Signals:\n${d.digital_criticality_signals.join('\n')}`);
+  }
   if (d.source_links.length > 0) {
     parts.push(`Sources:\n${d.source_links.join('\n')}`);
   }
@@ -91,7 +114,7 @@ export function formatDigitalNativeForAttio(d: DigitalNativeData): string {
 
 export const digitalNativeCacheGate = (cached: string): boolean => {
   const category = getDigitalNativeCategoryFromCached(cached);
-  return category !== null && category !== 'NOT Digital-native';
+  return category !== null && !REJECTED_CATEGORIES.has(category);
 };
 
 export function getDigitalNativeCategoryFromCached(cached: string): DigitalNativeCategory | null {

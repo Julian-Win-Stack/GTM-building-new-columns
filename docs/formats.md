@@ -4,12 +4,13 @@ Per-column format specs, Exa output schema details, and API mapping. Read this w
 
 ---
 
-## Identity columns (Company Name, Domain, LinkedIn Page, Description, Website, Account Purpose)
+## Identity columns (Company Name, Domain, LinkedIn Page, Description, Website, Account Purpose, Apollo ID)
 
 Written once at pipeline start (before Stage 1) for every CSV row:
 - Fill any column that is currently **empty** in Attio using the CSV value. Never overwrite a non-empty value.
 - Match Attio record by `Domain` when the CSV row has a Website, otherwise by `LinkedIn Page`. Never by Company Name.
 - `Description` comes from CSV column `Short Description`.
+- `Apollo ID` comes from CSV column `Apollo Account Id` (slug: `apollo_id`). Skipped silently when the CSV cell is empty; companies without it are still enriched.
 - Skip rows with neither a Domain nor a LinkedIn URL entirely.
 - CSV rows with only a LinkedIn URL are resolved via Attio cache to obtain a domain; the row won't participate in domain-keyed stages until a future run after Attio assigns a domain.
 - `Account Purpose` is written via `--account-purpose <value>` CLI flag (always overwrites). Only CSV-sourced rows receive it — Attio-only carry-over records are not tagged.
@@ -26,11 +27,15 @@ Confidence: <High | Medium | Low>
 
 Reasoning: <Exa's reason text>
 
+Signals:
+<signal1>
+<signal2>
+
 Sources:
 <url1>
 <url2>
 ```
-`Sources:` block omitted when Exa returns no links.
+`Signals:` block omitted when `digital_criticality_signals` is empty. `Sources:` block omitted when Exa returns no links.
 
 ---
 
@@ -50,7 +55,7 @@ Confidence: <high | medium | low>
 ```
 `Reasoning`, `Source link`, `Source date` omitted when empty. `Confidence` always present.
 Exa uses only directly disclosed evidence (press releases, official claims, ARR÷ACV when both explicitly stated, third-party estimates). Funding benchmarks and headcount ratios not used.
-Gate: `Digital-native B2B` companies must have `user_count_bucket === '100K+'`. `unknown` bucket passes (flag for human review). Fetch errors pass. Non-B2B passes unconditionally.
+Gate: `Digital-native B2B` and `Digitally critical B2B` companies must have `user_count_bucket === '100K+'`. `unknown` bucket passes (flag for human review). Fetch errors pass. All other categories (digital-native non-B2B, digitally critical non-B2B) pass unconditionally.
 
 ---
 

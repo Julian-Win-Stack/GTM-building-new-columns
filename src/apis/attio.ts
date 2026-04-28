@@ -9,6 +9,7 @@ export const FIELD_SLUGS: Record<string, string> = {
   'Description': 'description',
   'Website': 'website',
   'Account Purpose': 'account_purpose',
+  'Apollo ID': 'apollo_id',
   'Digital Native': 'digital_native',
   'Cloud Tool': 'cloud_tool',
   'Observability Tool': 'observability_tool',

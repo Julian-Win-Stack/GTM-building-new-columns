@@ -30,6 +30,7 @@ export async function runPipeline(
     'Description': row['Short Description'] ?? '',
     'Website': row['Website'] ?? '',
     'Account Purpose': '',
+    'Apollo ID': '',
     'Digital Native': values['Digital Native'] ?? '',
     'Cloud Tool': values['Cloud Tool'] ?? '',
     'Observability Tool': values['Observability Tool'] ?? '',

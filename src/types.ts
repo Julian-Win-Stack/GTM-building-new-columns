@@ -3,6 +3,7 @@ export type InputRow = {
   'Website': string;
   'Company Linkedin Url': string;
   'Short Description': string;
+  'Apollo Account Id': string;
 };
 
 export type EnrichableColumn =
@@ -36,6 +37,7 @@ export type EnrichmentResult = {
   'Description': string;
   'Website': string;
   'Account Purpose': string;
+  'Apollo ID': string;
   'Digital Native': string;
   'Cloud Tool': string;
   'Observability Tool': string;

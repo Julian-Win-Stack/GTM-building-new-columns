@@ -13,7 +13,7 @@ import {
 
 describe('digitalNativeRejectionReason', () => {
   it('returns the static reason regardless of data', () => {
-    const result = digitalNativeRejectionReason({ category: 'NOT Digital-native', confidence: 'high', reason: 'no API' });
+    const result = digitalNativeRejectionReason({ category: 'NOT Digital-native or digitally critical', confidence: 'high', reason: 'no API', digital_criticality_signals: [], source_links: [] });
     expect(result).toBe('Digital Native: not a digital-native company');
   });
 });

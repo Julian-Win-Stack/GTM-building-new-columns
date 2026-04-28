@@ -28,6 +28,7 @@ describe('parseDigitalNativeResponse', () => {
           category: 'Digital-native B2C',
           confidence: 'High',
           reason: 'Sells consumer apps.',
+          digital_criticality_signals: [],
           source_links: ['https://acme.com', 'https://acme.com/about'],
         },
       ],
@@ -40,6 +41,7 @@ describe('parseDigitalNativeResponse', () => {
       category: 'Digital-native B2C',
       confidence: 'High',
       reason: 'Sells consumer apps.',
+      digital_criticality_signals: [],
       source_links: ['https://acme.com', 'https://acme.com/about'],
     });
   });
@@ -52,6 +54,7 @@ describe('parseDigitalNativeResponse', () => {
           category: 'Digital-native B2C',
           confidence: 'High',
           reason: 'Consumer app.',
+          digital_criticality_signals: [],
           source_links: [],
         },
         {
@@ -59,6 +62,7 @@ describe('parseDigitalNativeResponse', () => {
           category: 'Digital-native B2B',
           confidence: 'Medium',
           reason: 'SaaS for businesses.',
+          digital_criticality_signals: [],
           source_links: ['https://beta.io'],
         },
       ],
@@ -80,6 +84,7 @@ describe('parseDigitalNativeResponse', () => {
           category: 'Digital-native B2C',
           confidence: 'High',
           reason: 'ok.',
+          digital_criticality_signals: [],
           source_links: [],
         },
       ],
@@ -98,6 +103,7 @@ describe('parseDigitalNativeResponse', () => {
           category: 'Digital-native B2C',
           confidence: 'High',
           reason: 'ok.',
+          digital_criticality_signals: [],
           source_links: [],
         },
       ],
@@ -116,6 +122,7 @@ describe('parseDigitalNativeResponse', () => {
           category: 'Digital-native B2C',
           confidence: 'High',
           reason: 'ok.',
+          digital_criticality_signals: [],
           source_links: [],
         },
       ],
@@ -135,6 +142,7 @@ describe('parseDigitalNativeResponse', () => {
           category: 'Digital-native B2B',
           confidence: 'High',
           reason: 'valid.',
+          digital_criticality_signals: [],
           source_links: [],
         },
       ],
@@ -155,6 +163,7 @@ describe('parseDigitalNativeResponse', () => {
           category: 'Not A Real Category',
           confidence: 'High',
           reason: 'bogus.',
+          digital_criticality_signals: [],
           source_links: [],
         },
       ],
@@ -195,33 +204,63 @@ describe('parseDigitalNativeResponse', () => {
 });
 
 describe('digitalNativeGate', () => {
-  it('rejects NOT Digital-native', () => {
+  it('rejects NOT Digital-native or digitally critical', () => {
     expect(
-      digitalNativeGate({ category: 'NOT Digital-native', confidence: 'High', reason: 'x', source_links: [] })
+      digitalNativeGate({ category: 'NOT Digital-native or digitally critical', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
+    ).toBe(false);
+  });
+
+  it('rejects legacy NOT Digital-native string', () => {
+    expect(
+      digitalNativeGate({ category: 'NOT Digital-native', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
     ).toBe(false);
   });
 
   it('accepts Digital-native B2B', () => {
     expect(
-      digitalNativeGate({ category: 'Digital-native B2B', confidence: 'High', reason: 'x', source_links: [] })
+      digitalNativeGate({ category: 'Digital-native B2B', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
     ).toBe(true);
   });
 
   it('accepts Digital-native B2C', () => {
     expect(
-      digitalNativeGate({ category: 'Digital-native B2C', confidence: 'High', reason: 'x', source_links: [] })
+      digitalNativeGate({ category: 'Digital-native B2C', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
     ).toBe(true);
   });
 
   it('accepts Digital-native B2B2C', () => {
     expect(
-      digitalNativeGate({ category: 'Digital-native B2B2C', confidence: 'High', reason: 'x', source_links: [] })
+      digitalNativeGate({ category: 'Digital-native B2B2C', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
     ).toBe(true);
   });
 
   it('accepts Digital-native B2C2B', () => {
     expect(
-      digitalNativeGate({ category: 'Digital-native B2C2B', confidence: 'High', reason: 'x', source_links: [] })
+      digitalNativeGate({ category: 'Digital-native B2C2B', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
+    ).toBe(true);
+  });
+
+  it('accepts Digitally critical B2C', () => {
+    expect(
+      digitalNativeGate({ category: 'Digitally critical B2C', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
+    ).toBe(true);
+  });
+
+  it('accepts Digitally critical B2B', () => {
+    expect(
+      digitalNativeGate({ category: 'Digitally critical B2B', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
+    ).toBe(true);
+  });
+
+  it('accepts Digitally critical B2B2C', () => {
+    expect(
+      digitalNativeGate({ category: 'Digitally critical B2B2C', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
+    ).toBe(true);
+  });
+
+  it('accepts Digitally critical B2C2B', () => {
+    expect(
+      digitalNativeGate({ category: 'Digitally critical B2C2B', confidence: 'High', reason: 'x', digital_criticality_signals: [], source_links: [] })
     ).toBe(true);
   });
 });
@@ -232,6 +271,7 @@ describe('formatDigitalNativeForAttio', () => {
       category: 'Digital-native B2C',
       confidence: 'High',
       reason: 'Sells consumer apps.',
+      digital_criticality_signals: [],
       source_links: [],
     };
     expect(formatDigitalNativeForAttio(data)).toBe(
@@ -244,6 +284,7 @@ describe('formatDigitalNativeForAttio', () => {
       category: 'Digital-native B2B',
       confidence: 'High',
       reason: 'SaaS for businesses.',
+      digital_criticality_signals: [],
       source_links: ['https://acme.com', 'https://acme.com/about'],
     };
     expect(formatDigitalNativeForAttio(data)).toBe(
@@ -256,9 +297,49 @@ describe('formatDigitalNativeForAttio', () => {
       category: 'Digital-native B2C',
       confidence: 'Low',
       reason: 'No good sources.',
+      digital_criticality_signals: [],
       source_links: [],
     };
     expect(formatDigitalNativeForAttio(data)).not.toContain('Sources:');
+  });
+
+  it('appends a Signals block when digital_criticality_signals are present', () => {
+    const data: DigitalNativeData = {
+      category: 'Digitally critical B2C',
+      confidence: 'High',
+      reason: 'Legacy retailer with major e-commerce platform.',
+      digital_criticality_signals: ['e-commerce', 'mobile app'],
+      source_links: [],
+    };
+    expect(formatDigitalNativeForAttio(data)).toBe(
+      'Digitally critical B2C\n\nConfidence: High\n\nReasoning: Legacy retailer with major e-commerce platform.\n\nSignals:\ne-commerce\nmobile app'
+    );
+  });
+
+  it('renders Signals before Sources when both are present', () => {
+    const data: DigitalNativeData = {
+      category: 'Digitally critical B2B',
+      confidence: 'Medium',
+      reason: 'Traditional bank with business portals.',
+      digital_criticality_signals: ['customer portal', 'API platform'],
+      source_links: ['https://bank.com/about'],
+    };
+    const result = formatDigitalNativeForAttio(data);
+    expect(result).toBe(
+      'Digitally critical B2B\n\nConfidence: Medium\n\nReasoning: Traditional bank with business portals.\n\nSignals:\ncustomer portal\nAPI platform\n\nSources:\nhttps://bank.com/about'
+    );
+    expect(result.indexOf('Signals:')).toBeLessThan(result.indexOf('Sources:'));
+  });
+
+  it('omits the Signals block when digital_criticality_signals is empty', () => {
+    const data: DigitalNativeData = {
+      category: 'Digital-native B2C',
+      confidence: 'High',
+      reason: 'Born digital.',
+      digital_criticality_signals: [],
+      source_links: [],
+    };
+    expect(formatDigitalNativeForAttio(data)).not.toContain('Signals:');
   });
 });
 
@@ -275,7 +356,25 @@ describe('digitalNativeCacheGate', () => {
     ).toBe(true);
   });
 
-  it('rejects a NOT Digital-native cached value', () => {
+  it('passes a Digitally critical B2C cached value', () => {
+    expect(
+      digitalNativeCacheGate('Digitally critical B2C\n\nConfidence: High\n\nReasoning: x')
+    ).toBe(true);
+  });
+
+  it('passes a Digitally critical B2B cached value', () => {
+    expect(
+      digitalNativeCacheGate('Digitally critical B2B\n\nConfidence: High\n\nReasoning: x')
+    ).toBe(true);
+  });
+
+  it('rejects a NOT Digital-native or digitally critical cached value', () => {
+    expect(
+      digitalNativeCacheGate('NOT Digital-native or digitally critical\n\nConfidence: High\n\nReasoning: x')
+    ).toBe(false);
+  });
+
+  it('rejects a legacy NOT Digital-native cached value', () => {
     expect(
       digitalNativeCacheGate('NOT Digital-native\n\nConfidence: High\n\nReasoning: x')
     ).toBe(false);
@@ -296,7 +395,19 @@ describe('getDigitalNativeCategoryFromCached', () => {
     expect(getDigitalNativeCategoryFromCached('Digital-native B2C\n\nConfidence: High\n\nReasoning: ...')).toBe('Digital-native B2C');
   });
 
-  it('returns NOT Digital-native', () => {
+  it('returns Digitally critical B2B', () => {
+    expect(getDigitalNativeCategoryFromCached('Digitally critical B2B\n\nConfidence: High\n\nReasoning: ...')).toBe('Digitally critical B2B');
+  });
+
+  it('returns Digitally critical B2C', () => {
+    expect(getDigitalNativeCategoryFromCached('Digitally critical B2C\n\nConfidence: High\n\nReasoning: ...')).toBe('Digitally critical B2C');
+  });
+
+  it('returns NOT Digital-native or digitally critical', () => {
+    expect(getDigitalNativeCategoryFromCached('NOT Digital-native or digitally critical\n\nConfidence: High\n\nReasoning: ...')).toBe('NOT Digital-native or digitally critical');
+  });
+
+  it('returns legacy NOT Digital-native string (backwards compat)', () => {
     expect(getDigitalNativeCategoryFromCached('NOT Digital-native\n\nConfidence: High\n\nReasoning: ...')).toBe('NOT Digital-native');
   });
 

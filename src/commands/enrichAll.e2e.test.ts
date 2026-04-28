@@ -155,6 +155,7 @@ function defaultExaMocks(domains: string[]) {
         category: 'Digital-native B2B',
         confidence: 'high',
         reason: 'SaaS platform',
+        digital_criticality_signals: [],
         source_links: [],
       }))
     )
@@ -651,14 +652,15 @@ describe('rejection propagation', () => {
       { 'Company Name': 'Reject Co', Website: 'reject.com', 'Company Linkedin Url': '', 'Short Description': '' },
     ]);
 
-    // Stage 2 returns NOT Digital-native → should be rejected
+    // Stage 2 returns NOT Digital-native or digitally critical → should be rejected
     m.digitalNativeExaSearch.mockResolvedValue(
       makeExaResponse([
         {
           domain: 'reject.com',
-          category: 'NOT Digital-native',
+          category: 'NOT Digital-native or digitally critical',
           confidence: 'high',
           reason: 'traditional retail chain',
+          digital_criticality_signals: [],
           source_links: [],
         },
       ])
@@ -691,14 +693,14 @@ describe('cache-gate', () => {
       { 'Company Name': 'Stale Co', Website: 'stale.com', 'Company Linkedin Url': '', 'Short Description': '' },
     ]);
 
-    // Attio already has Digital Native = "NOT Digital-native …"
+    // Attio already has Digital Native = "NOT Digital-native or digitally critical …"
     m.fetchAllRecords.mockResolvedValue(
       new Map([
         [
           'stale.com',
           {
             digital_native:
-              'NOT Digital-native\n\nConfidence: High\n\nReasoning: traditional firm\n\nSources:\nhttps://example.com',
+              'NOT Digital-native or digitally critical\n\nConfidence: High\n\nReasoning: traditional firm\n\nSources:\nhttps://example.com',
           },
         ],
       ])
@@ -752,6 +754,20 @@ describe('Stage 3 conditional gate', () => {
       bucket: '10K–100K',
       expectRejected: false,
     },
+    {
+      label: 'Digitally critical B2B + 10K–100K bucket → rejected',
+      domain: 'dc-b2b-small.com',
+      dnCategory: 'Digitally critical B2B',
+      bucket: '10K–100K',
+      expectRejected: true,
+    },
+    {
+      label: 'Digitally critical B2C + 10K–100K bucket → passes (gate is B2B-only)',
+      domain: 'dc-b2c-small.com',
+      dnCategory: 'Digitally critical B2C',
+      bucket: '10K–100K',
+      expectRejected: false,
+    },
   ];
 
   for (const tc of cases) {
@@ -767,6 +783,7 @@ describe('Stage 3 conditional gate', () => {
             category: tc.dnCategory,
             confidence: 'high',
             reason: 'test',
+            digital_criticality_signals: [],
             source_links: [],
           },
         ])

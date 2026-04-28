@@ -46,7 +46,7 @@ describe('runPipeline', () => {
       'Company Name': 'Acme',
       Website: 'https://acme.com',
       'Company Linkedin Url': 'https://linkedin.com/company/acme',
-      'Short Description': '',
+      'Short Description': '', 'Apollo Account Id': '',
     });
     for (const col of columnListMock) {
       expect(enrichersMock[col]).toHaveBeenCalledTimes(1);
@@ -59,7 +59,7 @@ describe('runPipeline', () => {
       'Company Name': 'Acme',
       Website: 'https://WWW.acme.com/about',
       'Company Linkedin Url': '',
-      'Short Description': '',
+      'Short Description': '', 'Apollo Account Id': '',
     });
     expect(out['Company Name']).toBe('Acme');
     expect(out.Domain).toBe('acme.com');
@@ -70,7 +70,7 @@ describe('runPipeline', () => {
       'Company Name': 'Acme',
       Website: 'https://acme.com',
       'Company Linkedin Url': '',
-      'Short Description': 'A widget company',
+      'Short Description': 'A widget company', 'Apollo Account Id': '',
     });
     expect(out['Description']).toBe('A widget company');
   });
@@ -89,7 +89,7 @@ describe('runPipeline', () => {
       'Company Name': 'Acme',
       Website: 'https://acme.com',
       'Company Linkedin Url': 'https://linkedin.com/company/acme',
-      'Short Description': '',
+      'Short Description': '', 'Apollo Account Id': '',
     });
     const passed = enrichersMock['Digital Native'].mock.calls[0]![0];
     expect(passed).toEqual({
@@ -106,7 +106,7 @@ describe('runPipeline', () => {
         'Company Name': 'Acme',
         Website: 'acme.com',
         'Company Linkedin Url': '',
-        'Short Description': '',
+        'Short Description': '', 'Apollo Account Id': '',
       },
       ['Digital Native', 'Cloud Tool']
     );
@@ -122,7 +122,7 @@ describe('runPipeline', () => {
         'Company Name': 'Acme',
         Website: 'acme.com',
         'Company Linkedin Url': '',
-        'Short Description': '',
+        'Short Description': '', 'Apollo Account Id': '',
       },
       ['Digital Native']
     );
@@ -136,7 +136,7 @@ describe('runSingleEnricher', () => {
   it('invokes exactly the requested enricher and returns its value', async () => {
     enrichersMock['Cloud Tool'].mockResolvedValue('AWS');
     const out = await runSingleEnricher(
-      { 'Company Name': 'Acme', Website: 'acme.com', 'Company Linkedin Url': '', 'Short Description': '' },
+      { 'Company Name': 'Acme', Website: 'acme.com', 'Company Linkedin Url': '', 'Short Description': '', 'Apollo Account Id': '' },
       'Cloud Tool'
     );
     expect(out).toBe('AWS');
@@ -152,7 +152,7 @@ describe('runSingleEnricher', () => {
         'Company Name': 'Acme',
         Website: 'https://www.acme.com/',
         'Company Linkedin Url': 'li',
-        'Short Description': '',
+        'Short Description': '', 'Apollo Account Id': '',
       },
       'Digital Native'
     );

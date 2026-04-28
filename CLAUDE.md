@@ -81,8 +81,8 @@ Flow: load CSV → pre-fetch ALL Attio records → merge processing set (CSV ∪
 | # | Column | API | Gate (pass condition) |
 |---|---|---|---|
 | 1 | Competitor Tooling | local + TheirStack | no gate |
-| 2 | Digital Native | Exa | category ≠ `NOT Digital-native` |
-| 3 | Number of Users | Exa | B2B: `user_count_bucket` must be `100K+`; non-B2B / unknown / errors pass |
+| 2 | Digital Native | Exa | category ≠ `NOT Digital-native or digitally critical` |
+| 3 | Number of Users | Exa | Digital-native B2B + Digitally critical B2B: `user_count_bucket` must be `100K+`; other categories / unknown / errors pass |
 | 4 | Observability Tool | Exa | no evidence OR Datadog / Grafana / Prometheus |
 | 5 | Communication Tool | TheirStack | no evidence OR Slack (reject if MS Teams) |
 | 6 | Cloud Tool | Exa | no evidence OR AWS / GCP (reject other clouds) |

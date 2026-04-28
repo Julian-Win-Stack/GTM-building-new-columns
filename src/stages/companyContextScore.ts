@@ -44,6 +44,7 @@ RULES:
 - A strong-fit-industry company can score lower if scale/usage/outage-sensitivity is limited.
 - A company outside listed industries can still score well if product is highly real-time and outage-sensitive.
 - If any key signal is not publicly confirmed, say so explicitly in reasoning.
+- "Digitally critical B2C" scores identically to "Digital-native B2C"; "Digitally critical B2B" to "Digital-native B2B"; "Digitally critical B2B2C" to "Digital-native B2B2C"; "Digitally critical B2C2B" to "Digital-native B2C2B". The prefix indicates a traditional company with a business-critical digital surface — the scoring logic is the same.
 
 Return JSON with: score (one of 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5) and reasoning (2–4 sentences referencing product nature, reliability sensitivity, industry, scale, and business model).`;
 

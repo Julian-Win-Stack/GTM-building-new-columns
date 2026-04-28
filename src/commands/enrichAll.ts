@@ -107,12 +107,14 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     linkedinUrl: string;
     description: string;
     website: string;
+    apolloId: string;
   };
 
   const csvIdentities: CsvIdentity[] = [];
   const companies: StageCompany[] = [];
   const linkedinByDomain = new Map<string, string>();
-  const skippedRows: Array<{ name: string; linkedinUrl?: string }> = [];
+  const skippedRows: Array<{ name: string; linkedinUrl?: string; missingApolloId: boolean }> = [];
+  const missingApolloIdRows: Array<{ name: string; domain: string }> = [];
 
   for (const raw of subset) {
     const row = raw as InputRow;
@@ -121,16 +123,18 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     const linkedinUrl = normalizeLinkedInUrl(row['Company Linkedin Url'] ?? '');
     const name = row['Company Name'] ?? '';
     const description = row['Short Description'] ?? '';
+    const apolloId = (row['Apollo Account Id'] ?? '').trim();
 
     if (!domain) {
-      skippedRows.push({ name: name || '(unknown)', linkedinUrl: linkedinUrl || undefined });
+      skippedRows.push({ name: name || '(unknown)', linkedinUrl: linkedinUrl || undefined, missingApolloId: !apolloId });
       continue;
     }
 
-    const identity: CsvIdentity = { name, domain, linkedinUrl, description, website };
+    const identity: CsvIdentity = { name, domain, linkedinUrl, description, website, apolloId };
     csvIdentities.push(identity);
     companies.push({ companyName: name, domain });
     if (linkedinUrl) linkedinByDomain.set(domain, linkedinUrl);
+    if (!apolloId) missingApolloIdRows.push({ name: name || domain, domain });
   }
 
   const skippedBadDomain = skippedRows.length;
@@ -141,14 +145,23 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   console.log(`[enrich] Limit: ${opts.limit ? `${opts.limit} ${opts.limit === 1 ? 'row' : 'rows'}` : 'none (process all rows)'}`);
   console.log();
   console.log(`[preflight] Scanned ${subset.length} ${subset.length === 1 ? 'row' : 'rows'} in CSV.`);
-  if (skippedRows.length === 0) {
+  if (skippedRows.length === 0 && missingApolloIdRows.length === 0) {
     console.log(`[preflight] Every company in the CSV looks good — nothing will be skipped.`);
   } else {
-    console.log(`[preflight] ${skippedRows.length} ${skippedRows.length === 1 ? 'row' : 'rows'} will be skipped:`);
-    const sortedSkipped = [...skippedRows].sort((a, b) => (b.linkedinUrl ? 1 : 0) - (a.linkedinUrl ? 1 : 0));
-    for (const s of sortedSkipped) console.log(`  - "${s.name}"${s.linkedinUrl ? ` [${s.linkedinUrl}]` : ''}`);
-    const usableCount = subset.length - skippedRows.length;
-    console.log(`[preflight] ${usableCount} ${usableCount === 1 ? 'company' : 'companies'} from CSV will be processed.`);
+    if (skippedRows.length > 0) {
+      console.log(`[preflight] ${skippedRows.length} ${skippedRows.length === 1 ? 'row' : 'rows'} will be skipped:`);
+      const sortedSkipped = [...skippedRows].sort((a, b) => (b.linkedinUrl ? 1 : 0) - (a.linkedinUrl ? 1 : 0));
+      for (const s of sortedSkipped) {
+        const apolloNote = s.missingApolloId ? ' (also doesn\'t have Apollo ID)' : '';
+        console.log(`  - "${s.name}"${s.linkedinUrl ? ` [${s.linkedinUrl}]` : ''}${apolloNote}`);
+      }
+      const usableCount = subset.length - skippedRows.length;
+      console.log(`[preflight] ${usableCount} ${usableCount === 1 ? 'company' : 'companies'} from CSV will be processed.`);
+    }
+    if (missingApolloIdRows.length > 0) {
+      console.log(`[preflight] ${missingApolloIdRows.length} ${missingApolloIdRows.length === 1 ? 'company' : 'companies'} missing Apollo ID (will still be processed):`);
+      for (const r of missingApolloIdRows) console.log(`  - "${r.name}" [${r.domain}]`);
+    }
   }
   console.log();
 
@@ -171,6 +184,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const domainSlug = FIELD_SLUGS['Domain']!;
   const descriptionSlug = FIELD_SLUGS['Description']!;
   const websiteSlug = FIELD_SLUGS['Website']!;
+  const apolloIdSlug = FIELD_SLUGS['Apollo ID']!;
 
   const csvDomainSet = new Set(companies.map((c) => c.domain));
   let attioOnlyIncluded = 0;
@@ -202,6 +216,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
       if (id.linkedinUrl && !existingValues[linkedinSlug]) toWrite['LinkedIn Page'] = id.linkedinUrl;
       if (id.description && !existingValues[descriptionSlug]) toWrite['Description'] = id.description;
       if (id.website && !existingValues[websiteSlug]) toWrite['Website'] = id.website;
+      if (id.apolloId && !existingValues[apolloIdSlug]) toWrite['Apollo ID'] = id.apolloId;
       if (opts.accountPurpose) toWrite['Account Purpose'] = opts.accountPurpose;
       return { id, toWrite };
     })
@@ -305,7 +320,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   await writeRejectionReasons([...stage2TodoRejected, ...stage2DoneRejected]);
   const survivorsAfterStage2 = [...stage2TodoSurvivors, ...stage2DoneSurvivors];
 
-  // Stage 3 — Number of Users (conditional gate: Digital-native B2B companies must have >= 100k users)
+  // Stage 3 — Number of Users (conditional gate: Digital-native B2B and Digitally critical B2B must have >= 100k users)
   const stage3Slug = FIELD_SLUGS['Number of Users']!;
   const dnSlug = FIELD_SLUGS['Digital Native']!;
   const { todo: stage3Todo, done: stage3Done } = splitByCache(survivorsAfterStage2, attioCache, stage3Slug);
@@ -331,7 +346,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
 
   function userCountPassesGate(domain: string, bucket: UserCountBucket | null, hadError: boolean): boolean {
     const dnCategory = getDigitalNativeCategoryFromCached(attioCache.get(domain)?.[dnSlug] ?? '');
-    if (dnCategory !== 'Digital-native B2B') return true;
+    if (dnCategory !== 'Digital-native B2B' && dnCategory !== 'Digitally critical B2B') return true;
     if (hadError) return true;
     if (bucket === null || bucket === 'unknown') return true;
     return bucket === '100K+';
