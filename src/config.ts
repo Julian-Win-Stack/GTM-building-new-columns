@@ -10,6 +10,16 @@ export const PATHS = {
   cache: path.join(ROOT, 'cache'),
 } as const;
 
+function parseXApiKeys(): string[] {
+  const multi = process.env.X_API_KEYS;
+  if (multi) return multi.split(',').map((k) => k.trim()).filter(Boolean);
+  const single = process.env.X_API_KEY;
+  if (single) return [single];
+  return [];
+}
+
+export const XAPI_KEYS: string[] = parseXApiKeys();
+
 export const KEYS = {
   apify: process.env.APIFY_TOKEN ?? '',
   exa: process.env.EXA_API_KEY ?? '',
@@ -21,7 +31,6 @@ export const KEYS = {
   attio: process.env.ATTIO_API_KEY ?? '',
   attioObjectSlug: process.env.ATTIO_OBJECT_SLUG ?? 'ranked_companies',
   apollo: process.env.APOLLO_API_KEY ?? '',
-  xApi: process.env.X_API_KEY ?? '',
 } as const;
 
 export const CONCURRENCY = Number(process.env.CONCURRENCY ?? 3);

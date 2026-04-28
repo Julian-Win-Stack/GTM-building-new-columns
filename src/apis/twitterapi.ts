@@ -1,12 +1,5 @@
 import axios from 'axios';
-import { KEYS } from '../config.js';
 import { scheduleTwitterApi } from '../rateLimit.js';
-
-const http = axios.create({
-  baseURL: 'https://api.twitterapi.io',
-  headers: { 'X-API-Key': KEYS.xApi },
-  timeout: 30_000,
-});
 
 export type TwitterTweet = { text: string; id?: string; url?: string };
 export type TwitterSearchResponse = {
@@ -24,11 +17,17 @@ function shortCursor(c: string): string {
 
 export async function twitterAdvancedSearch(
   query: string,
-  cursor: string
+  cursor: string,
+  apiKey: string
 ): Promise<TwitterSearchResponse> {
-  const { data } = await http.get<TwitterSearchResponse>('/twitter/tweet/advanced_search', {
-    params: { query, queryType: 'Latest', cursor },
-  });
+  const { data } = await axios.get<TwitterSearchResponse>(
+    'https://api.twitterapi.io/twitter/tweet/advanced_search',
+    {
+      headers: { 'X-API-Key': apiKey },
+      params: { query, queryType: 'Latest', cursor },
+      timeout: 30_000,
+    }
+  );
   return data;
 }
 
@@ -57,10 +56,16 @@ export async function fetchComplaintTweets(domain: string, companyName: string):
     page++;
     const cursorIn = cursor;
     try {
-      const res = await scheduleTwitterApi(() => twitterAdvancedSearch(query, cursor));
+      let usedKeyIndex = 0;
+      let keyCount = 1;
+      const res = await scheduleTwitterApi((apiKey, ki, kc) => {
+        usedKeyIndex = ki;
+        keyCount = kc;
+        return twitterAdvancedSearch(query, cursor, apiKey);
+      });
       for (const tweet of res.tweets) accumulated.push({ text: tweet.text, url: tweetUrl(tweet) });
       console.log(
-        `[twitterapi] ${domain} page ${page}: tweets=${res.tweets.length} total=${accumulated.length} has_next=${res.has_next_page} cursor_in=${shortCursor(cursorIn)} cursor_out=${shortCursor(res.next_cursor)}`
+        `[twitterapi] ${domain} page ${page} key=${usedKeyIndex + 1}/${keyCount}: tweets=${res.tweets.length} total=${accumulated.length} has_next=${res.has_next_page} cursor_in=${shortCursor(cursorIn)} cursor_out=${shortCursor(res.next_cursor)}`
       );
       if (!res.has_next_page) break;
       cursor = res.next_cursor;

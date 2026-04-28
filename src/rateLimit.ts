@@ -1,6 +1,6 @@
 import Bottleneck from 'bottleneck';
 import pLimit from 'p-limit';
-import { EXA_QPS, THEIRSTACK_QPS, APOLLO_QPS, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, APIFY_CONCURRENCY, TWITTER_API_QPS, STATUSPAGE_CONCURRENCY } from './config.js';
+import { EXA_QPS, THEIRSTACK_QPS, APOLLO_QPS, ATTIO_WRITE_CONCURRENCY, OPENAI_CONCURRENCY, APIFY_CONCURRENCY, TWITTER_API_QPS, STATUSPAGE_CONCURRENCY, XAPI_KEYS } from './config.js';
 
 export const exaLimiter = new Bottleneck({
   reservoir: EXA_QPS,
@@ -43,18 +43,33 @@ export function scheduleApify<T>(fn: () => Promise<T>): Promise<T> {
   return apifyLimit(fn);
 }
 
-const twitterMutex = pLimit(1);
-const TWITTER_MIN_MS = Math.ceil(1000 / TWITTER_API_QPS);
-let lastTwitterCallAt = 0;
+if (XAPI_KEYS.length === 0) {
+  throw new Error('No twitterapi.io key(s) configured — set X_API_KEYS or X_API_KEY in .env');
+}
 
-export function scheduleTwitterApi<T>(fn: () => Promise<T>): Promise<T> {
-  return twitterMutex(async () => {
-    const wait = TWITTER_MIN_MS - (Date.now() - lastTwitterCallAt);
+const TWITTER_MIN_MS = Math.ceil(1000 / TWITTER_API_QPS);
+
+type TwitterSlot = { apiKey: string; keyIndex: number; mutex: ReturnType<typeof pLimit>; lastCallAt: number };
+
+const twitterSlots: TwitterSlot[] = XAPI_KEYS.map((apiKey, i) => ({
+  apiKey,
+  keyIndex: i,
+  mutex: pLimit(1),
+  lastCallAt: 0,
+}));
+
+let nextSlot = 0;
+
+export function scheduleTwitterApi<T>(fn: (apiKey: string, keyIndex: number, keyCount: number) => Promise<T>): Promise<T> {
+  const slot = twitterSlots[nextSlot % twitterSlots.length]!;
+  nextSlot++;
+  return slot.mutex(async () => {
+    const wait = TWITTER_MIN_MS - (Date.now() - slot.lastCallAt);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     try {
-      return await fn();
+      return await fn(slot.apiKey, slot.keyIndex, twitterSlots.length);
     } finally {
-      lastTwitterCallAt = Date.now();
+      slot.lastCallAt = Date.now();
     }
   });
 }

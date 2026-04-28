@@ -10,7 +10,7 @@ Every outbound API call must go through its scheduler — never call the underly
 | `scheduleTheirstack()` | Bottleneck QPS | 3.5 QPS | 300 RPM free plan |
 | `scheduleApollo()` | Bottleneck QPS | 3 QPS | 200/min + 6000/hr; 429s on hourly cap handled by runStage retry |
 | `scheduleApify()` | p-limit concurrency | 10 concurrent | Long-running run-sync calls (30s–2 min) — concurrency, not QPS, is the right shape |
-| `scheduleTwitterApi()` | Bottleneck QPS | 10 QPS | Provider allows 1000+ RPS |
+| `scheduleTwitterApi()` | per-key mutex+minTime | `TWITTER_API_QPS` × N keys | Caller receives `(apiKey, keyIndex, keyCount)` — round-robins across `X_API_KEYS` |
 | `scheduleStatuspage()` | p-limit concurrency | 20 concurrent | No documented rate limit; probes hit different hosts so only local socket cap needed |
 | `attioWriteLimit` | p-limit concurrency | 5 concurrent | — |
 | `openaiLimit` | p-limit concurrency | 5 concurrent | — |
@@ -44,7 +44,8 @@ If Apify returns `statusMessage === 'rate limited'` (LinkedIn hourly cap), `runH
 | `APIFY_CONCURRENCY` | 10 | match your Apify plan: free=3, personal=10, team=25+ |
 | `APIFY_RETRY_TRIES` | 3 | |
 | `APIFY_RETRY_BASE_MS` | 2000 | |
-| `TWITTER_API_QPS` | 10 | calls/sec |
+| `X_API_KEYS` | (required) | Comma-separated twitterapi.io keys; fallback: `X_API_KEY` for a single key |
+| `TWITTER_API_QPS` | 10 | calls/sec **per key** |
 | `TWITTER_API_RETRY_TRIES` | 3 | |
 | `TWITTER_API_RETRY_BASE_MS` | 1000 | |
 | `STATUSPAGE_CONCURRENCY` | 20 | max concurrent probes |

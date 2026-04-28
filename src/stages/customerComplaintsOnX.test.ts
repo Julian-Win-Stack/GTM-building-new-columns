@@ -87,11 +87,11 @@ describe('parseCustomerComplaintsResponse', () => {
     const tweets = makeTweets(['down', 'partial', 'outage again', 'weird']);
     const results = await parseCustomerComplaintsResponse(tweets, [company]);
 
-    expect(results[0]!.data.full_outage).toBe(2);
-    expect(results[0]!.data.full_outage_urls).toEqual(['https://x.com/i/status/1', 'https://x.com/i/status/3']);
-    expect(results[0]!.data.partial_outage).toBe(1);
-    expect(results[0]!.data.partial_outage_urls).toEqual(['https://x.com/i/status/2']);
-    expect(results[0]!.data.unclear).toBe(1);
+    expect(results[0]!.data!.full_outage).toBe(2);
+    expect(results[0]!.data!.full_outage_urls).toEqual(['https://x.com/i/status/1', 'https://x.com/i/status/3']);
+    expect(results[0]!.data!.partial_outage).toBe(1);
+    expect(results[0]!.data!.partial_outage_urls).toEqual(['https://x.com/i/status/2']);
+    expect(results[0]!.data!.unclear).toBe(1);
     expect(judge).toHaveBeenCalledOnce();
   });
 
@@ -99,7 +99,7 @@ describe('parseCustomerComplaintsResponse', () => {
     vi.mocked(judge).mockResolvedValue({ categories: ['full_outage'] });
     const tweets: TweetItem[] = [{ text: 'down', url: '' }];
     const results = await parseCustomerComplaintsResponse(tweets, [company]);
-    expect(results[0]!.data.full_outage_urls).toEqual([]);
+    expect(results[0]!.data!.full_outage_urls).toEqual([]);
   });
 
   it('deduplicates tweets by URL before sending to OpenAI', async () => {
@@ -111,8 +111,8 @@ describe('parseCustomerComplaintsResponse', () => {
     ];
     const results = await parseCustomerComplaintsResponse(tweets, [company]);
     // OpenAI received 2 tweets (duplicate removed), classified as full_outage + partial_outage
-    expect(results[0]!.data.full_outage).toBe(1);
-    expect(results[0]!.data.partial_outage).toBe(1);
+    expect(results[0]!.data!.full_outage).toBe(1);
+    expect(results[0]!.data!.partial_outage).toBe(1);
     const call = vi.mocked(judge).mock.calls[0]![0];
     expect(call.user).toContain('2. "partial"'); // 2 deduped tweets sent
     expect(call.user).not.toContain('"still down"'); // duplicate was dropped
@@ -124,11 +124,11 @@ describe('parseCustomerComplaintsResponse', () => {
     });
     const tweets = makeTweets(['unrelated', 'down', 'also unrelated']);
     const results = await parseCustomerComplaintsResponse(tweets, [company]);
-    expect(results[0]!.data.full_outage).toBe(1);
-    expect(results[0]!.data.partial_outage).toBe(0);
-    expect(results[0]!.data.performance_degradation).toBe(0);
-    expect(results[0]!.data.unclear).toBe(0);
-    expect(results[0]!.data.full_outage_urls).toEqual(['https://x.com/i/status/2']);
+    expect(results[0]!.data!.full_outage).toBe(1);
+    expect(results[0]!.data!.partial_outage).toBe(0);
+    expect(results[0]!.data!.performance_degradation).toBe(0);
+    expect(results[0]!.data!.unclear).toBe(0);
+    expect(results[0]!.data!.full_outage_urls).toEqual(['https://x.com/i/status/2']);
   });
 
   it('passes company name and domain into the prompt', async () => {
