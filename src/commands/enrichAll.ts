@@ -70,7 +70,7 @@ import { computeInputHash, scoreCompanyContext, formatContextScoreForAttio, type
 import { scoreToolingMatch, formatToolingMatchScoreForAttio, TOOLING_MATCH_INPUT_COLUMNS, type ToolingMatchScoreData } from '../stages/toolingMatchScore.js';
 import { scoreIntentSignal, formatIntentSignalScoreForAttio, INTENT_SIGNAL_INPUT_COLUMNS, type IntentSignalScoreData } from '../stages/intentSignalScore.js';
 import { scoreFinal, formatFinalScoreForAttio, FINAL_SCORE_INPUT_COLUMNS, type FinalScoreData } from '../stages/finalScore.js';
-import { fetchAllRecords, upsertCompanyByDomain, upsertCompanyByLinkedInUrl, FIELD_SLUGS } from '../apis/attio.js';
+import { fetchAllRecords, upsertCompanyByDomain, FIELD_SLUGS } from '../apis/attio.js';
 import { attioWriteLimit } from '../rateLimit.js';
 
 export type EnrichAllOptions = {
@@ -112,9 +112,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const csvIdentities: CsvIdentity[] = [];
   const companies: StageCompany[] = [];
   const linkedinByDomain = new Map<string, string>();
-  const skippedRows: Array<{ name: string }> = [];
+  const skippedRows: Array<{ name: string; linkedinUrl?: string }> = [];
 
-  const pendingLinkedInOnly: CsvIdentity[] = [];
   for (const raw of subset) {
     const row = raw as InputRow;
     const website = row['Website'] ?? '';
@@ -123,19 +122,15 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     const name = row['Company Name'] ?? '';
     const description = row['Short Description'] ?? '';
 
-    if (!domain && !linkedinUrl) {
-      skippedRows.push({ name: name || '(unknown)' });
+    if (!domain) {
+      skippedRows.push({ name: name || '(unknown)', linkedinUrl: linkedinUrl || undefined });
       continue;
     }
 
     const identity: CsvIdentity = { name, domain, linkedinUrl, description, website };
-    if (domain) {
-      csvIdentities.push(identity);
-      companies.push({ companyName: name, domain });
-      if (linkedinUrl) linkedinByDomain.set(domain, linkedinUrl);
-    } else {
-      pendingLinkedInOnly.push(identity);
-    }
+    csvIdentities.push(identity);
+    companies.push({ companyName: name, domain });
+    if (linkedinUrl) linkedinByDomain.set(domain, linkedinUrl);
   }
 
   const skippedBadDomain = skippedRows.length;
@@ -149,8 +144,9 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   if (skippedRows.length === 0) {
     console.log(`[preflight] Every company in the CSV looks good — nothing will be skipped.`);
   } else {
-    console.log(`[preflight] ${skippedRows.length} ${skippedRows.length === 1 ? 'row' : 'rows'} will be skipped (no Website and no LinkedIn URL):`);
-    for (const s of skippedRows) console.log(`  - "${s.name}"`);
+    console.log(`[preflight] ${skippedRows.length} ${skippedRows.length === 1 ? 'row' : 'rows'} will be skipped:`);
+    const sortedSkipped = [...skippedRows].sort((a, b) => (b.linkedinUrl ? 1 : 0) - (a.linkedinUrl ? 1 : 0));
+    for (const s of sortedSkipped) console.log(`  - "${s.name}"${s.linkedinUrl ? ` [${s.linkedinUrl}]` : ''}`);
     const usableCount = subset.length - skippedRows.length;
     console.log(`[preflight] ${usableCount} ${usableCount === 1 ? 'company' : 'companies'} from CSV will be processed.`);
   }
@@ -176,26 +172,6 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   const descriptionSlug = FIELD_SLUGS['Description']!;
   const websiteSlug = FIELD_SLUGS['Website']!;
 
-  const byLinkedIn = new Map<string, { domain: string; values: Record<string, string> }>();
-  for (const [domain, values] of attioCache) {
-    const li = values[linkedinSlug];
-    if (li) byLinkedIn.set(li, { domain, values });
-  }
-
-  // Rows with a LinkedIn URL but no domain in CSV — try to resolve domain via LinkedIn URL against Attio cache.
-  for (const identity of pendingLinkedInOnly) {
-    const hit = byLinkedIn.get(identity.linkedinUrl);
-    if (hit) {
-      identity.domain = hit.domain;
-      console.log(`[enrich-all] ${identity.name}: no CSV domain, resolved via LinkedIn URL → ${hit.domain}`);
-      csvIdentities.push(identity);
-      companies.push({ companyName: identity.name, domain: hit.domain });
-      if (!linkedinByDomain.has(hit.domain)) linkedinByDomain.set(hit.domain, identity.linkedinUrl);
-    } else {
-      csvIdentities.push(identity);
-    }
-  }
-
   const csvDomainSet = new Set(companies.map((c) => c.domain));
   let attioOnlyIncluded = 0;
   let attioOnlyRejected = 0;
@@ -216,12 +192,10 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
   );
 
   // Identity-write: for each CSV row, fill empty identity columns (Name, Domain, LinkedIn Page, Description, Website) and
-  // always overwrite Account Purpose when --account-purpose is set. Match by domain when available, else by LinkedIn URL.
+  // always overwrite Account Purpose when --account-purpose is set. Match by domain.
   const identityWrites = csvIdentities
     .map((id) => {
-      const existingValues: Record<string, string> = id.domain
-        ? attioCache.get(id.domain) ?? {}
-        : byLinkedIn.get(id.linkedinUrl)?.values ?? {};
+      const existingValues: Record<string, string> = attioCache.get(id.domain) ?? {};
       const toWrite: Partial<EnrichmentResult> = {};
       if (id.name && !existingValues[nameSlug]) toWrite['Company Name'] = id.name;
       if (id.domain && !existingValues[domainSlug]) toWrite['Domain'] = id.domain;
@@ -238,11 +212,8 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<void> {
     await Promise.all(
       identityWrites.map(({ id, toWrite }) =>
         attioWriteLimit(() => {
-          const write = id.domain
-            ? upsertCompanyByDomain({ 'Domain': id.domain, ...toWrite })
-            : upsertCompanyByLinkedInUrl({ 'LinkedIn Page': id.linkedinUrl, ...toWrite });
-          return write.catch((err) => {
-            const ref = id.domain || id.linkedinUrl;
+          return upsertCompanyByDomain({ 'Domain': id.domain, ...toWrite }).catch((err) => {
+            const ref = id.domain;
             console.error(`[identity-preflight] failed for ${ref}: ${err instanceof Error ? err.message : String(err)}`);
           });
         })
