@@ -1,8 +1,10 @@
 # Project
-**Bacca.ai** is an AI SRE startup that sells software to high-scale digital-native platforms. This CLI script enriches potential customers (from a CSV) via Apify, Exa, TheirStack, and Azure OpenAI, then writes results to an Attio custom object (`ranked_companies`) — scoring each company against Bacca's ICP so the sales team can prioritise outreach.
+**Bacca.ai** is an AI SRE startup that sells software to high-scale digital-native platforms. This repo enriches potential customers (from a CSV) via Apify, Exa, TheirStack, twitterapi.io, Statuspage, Apollo, and Azure OpenAI, scoring each company against Bacca's ICP. Two surfaces share the same pipeline:
+- **CLI (`./enrich`)** — the original automation entry point. Always writes results to the Attio custom object (`ranked_companies`).
+- **Web UI (`npm run ui`, deployed to Railway)** — a one-page React app for CEO / GTM leads / GTM interns. Upload a CSV, optionally toggle Attio sync, watch rows fill in stage by stage, download a CSV.
 
 ## Stack
-- TypeScript (strict, ESNext modules, `tsx` for direct execution)
+- TypeScript (strict, ESNext modules, `tsx` for direct execution at runtime — no compile step on the server)
 - Node.js ≥18, ESM (`"type": "module"`)
 - commander — CLI parsing
 - axios — Attio REST API client
@@ -13,14 +15,18 @@
 - bottleneck — QPS rate limiter; p-limit — concurrency limiter
 - dotenv — env loading
 - vitest — unit tests
+- express + multer — HTTP server + multipart CSV upload (web UI)
+- react + vite + @tanstack/react-table — frontend single-page app
+- 1-second polling (no extra lib) — frontend `GET /api/runs/:id/state` keeps the UI in sync with the pipeline (replaced SSE for better resilience on flaky networks / corporate proxies / Railway)
 
 ## Architecture
 ```
-enrich                   — bash wrapper around npm run enrich-all (the primary way humans run this)
+enrich                   — bash wrapper around npm run enrich-all (the CLI surface)
 src/
   index.ts               — CLI entry; registers the enrich-all command
   config.ts              — KEYS, PATHS, CONCURRENCY, ENRICHABLE_COLUMNS, all API tunable env vars (single source of truth)
   types.ts               — EnrichableColumn, EnrichmentResult, InputRow, EnricherFn, AttioRecord
+  runTypes.ts            — RunEvent + RunCtx + ActivityEntry + RunStateSnapshot (shared between pipeline emit and the polling endpoint)
   rateLimit.ts           — scheduleExa/Theirstack/Apollo/Apify/TwitterApi/Statuspage + attioWriteLimit/openaiLimit
   pipeline.ts            — runPipeline (all columns) + runSingleEnricher (one column)
   csv.ts                 — readInputCsv
@@ -28,9 +34,9 @@ src/
   cache.ts               — disk cache helpers
   filterSurvivors.ts     — filterSurvivors (fresh gate) + filterCachedSurvivors (cached gate)
   runStage.ts            — generic stage runner: batching, concurrency, retry
-  writeStageColumn.ts    — write one column to Attio for all successful stage results
+  writeStageColumn.ts    — write one column to Attio for all successful stage results (gated by ctx.writeToAttio)
   rejectionReasons.ts    — reason-string builders per gate stage (fresh + cached variants)
-  writeRejectionReason.ts — crash-safe Attio writer for Reason for Rejection column
+  writeRejectionReason.ts — crash-safe Attio writer for Reason for Rejection column (gated by ctx.writeToAttio)
   apis/
     attio.ts             — Attio REST client: upsertCompanyByDomain, upsertCompanyByLinkedInUrl, find*
     exa.ts               — Exa search; structured JSON outputSchema for most stages; text outputSchema for Stages 15+16
@@ -68,8 +74,36 @@ src/
     toolingMatchScore.ts    — Stage 19 (Tooling Match Score, OpenAI pro, hash-gated)
     intentSignalScore.ts    — Stage 20 (Intent Signal Score, OpenAI pro, hash-gated)
     finalScore.ts           — Stage 21 (Final Score, local formula + OpenAI reasoning, hash-gated)
-data/input.csv             — input (gitignored)
+data/input.csv             — CLI input (gitignored)
 cache/                     — disk cache for API responses
+tmp/                       — uploaded CSVs from the web UI (gitignored, ephemeral)
+
+server/
+  index.ts                 — Express app: POST /api/runs (multipart upload + resume detection), POST /api/runs/:id/start, POST /api/runs/:id/resume, GET /api/runs/:id/state (polling snapshot, no-store), POST /api/runs/:id/cancel, GET /api/runs/:id/csv, GET /api/columns, GET /api/health. Hosts the 1s snapshot flusher + 7d snapshot TTL sweep + 5min finished-run sweep. Serves web/dist/ as static files in production.
+  runRegistry.ts           — in-memory Map<runId, { status, totalCompanies, skippedRows, currentStage, stagesCompleted, completedStageNames, recentActivity (12-entry ring), lastEventAt, surviving/rejected/errored, liveCache, dirty, domains, cancelSignal, triggerCancel, … }> + serializeRun(run) → RunStateSnapshot (cancel-aware status mapping)
+  snapshotStore.ts         — disk-backed crash-recovery snapshots (writeSnapshot/loadSnapshot/findResumableSnapshot/sweepOldSnapshots). Reads SNAPSHOT_DIR env var
+  csvOutput.ts             — renderCsv(attioCache) → string in CSV_COLUMN_ORDER
+  columns.ts               — CSV_COLUMN_ORDER, CSV_COLUMNS (display+slug), STAGE_COLUMNS, IDENTITY_COLUMNS, DEVELOPER_COLUMNS
+
+web/
+  index.html, vite.config.ts, tsconfig.json
+  src/
+    main.tsx, App.tsx, App.css   — single-page shell
+    components/
+      ControlDeck.{tsx,css}      — CSV upload + Account Purpose input + "Push to Attio" toggle + Start button
+      RunStatus.{tsx,css}        — stage indicator + progress bar + Download CSV button + Cancel button
+      SkippedPanel.{tsx,css}     — collapsible list of CSV rows skipped at preflight (no website)
+      ResumeBanner.{tsx,css}     — shown when the uploaded CSV matches a saved snapshot; offers Resume vs Start fresh
+      ActivityFeed.{tsx,css}     — rolling feed of recent cell-update / rejection events + heartbeat indicator (proves the run is alive). Replaced the old LiveTable.
+    lib/
+      runTypes.ts                — frontend mirror of src/runTypes.ts (ActivityEntry + RunStateSnapshot — only the polling-consumed parts)
+      useRunStream.ts            — 1-second polling hook (`GET /api/runs/:id/state`); stops on terminal status; optimistic 'cancelling' hold prevents flicker
+      columns.ts                 — mirror of server/columns.ts (CSV_COLUMN_ORDER, COLUMN_WIDTHS, STAGE_COLUMNS)
+    styles/
+      global.css                 — CSS variables (dark theme), film-grain overlay, animations
+  dist/                          — vite build output (gitignored)
+
+railway.json                  — Railway deploy config: nixpacks build, npm start, /api/health
 ```
 
 ## Stage-wise pipeline (enrich-all)
@@ -111,44 +145,78 @@ Flow: load CSV → pre-fetch ALL Attio records → merge processing set (CSV ∪
 - **Stages 11+12** share one Apify call; cache-skip requires both slugs non-empty.
 - **Stages 18/19/20** all operate on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty. Independent of each other.
 - **Stage 21** additionally requires all 3 upstream score columns non-empty; runs after 18/19/20.
-- **Identity-write** runs before Stage 1: fills empty Attio columns from CSV (never overwrites). Match by Domain, then LinkedIn URL. Skip rows with neither.
-- **Preflight** runs before identity-write: scans the CSV (after `--limit` is applied), reports rows that will be skipped (no Website AND no LinkedIn URL), then waits 3 seconds for Ctrl-C before any Attio writes happen. Tests bypass via the internal `skipConfirm` option.
+- **Identity-write** runs before Stage 1: fills empty Attio columns from CSV (never overwrites). Match by Domain only.
+- **Preflight** runs before identity-write: scans the CSV (after `--limit` is applied), reports rows that will be skipped (no Website — LinkedIn-only rows are skipped too), then waits 3 seconds for Ctrl-C before any Attio writes happen. Tests bypass via the internal `skipConfirm` option.
 
 See `docs/formats.md` for per-column Attio value formats, hash-gating details, and API mapping.
 
 ## Commands
-Primary entrypoint:
+
+CLI (always writes to Attio):
 ```
 ./enrich                                # process every row in ./data/input.csv
 ./enrich "Q1 2026 ABM"                  # tag every CSV-sourced row with this Account Purpose
 ./enrich --limit 5                      # 5-row test run
-./enrich "Q1 2026 ABM" --limit 5
+
+# Underlying npm command (escape hatch — custom CSV path, scripted invocation, etc.):
+npm run enrich-all -- --csv <path> [--limit N] [--account-purpose "..."]
 ```
 
-Underlying npm command (escape hatch — custom CSV path, scripted invocation, etc.):
+Web UI (Attio sync optional, controlled by the in-app toggle):
 ```
-npm run enrich-all -- --csv <path> [--limit N] [--account-purpose "..."]
+npm run ui                              # dev: Vite (5173) + Express (3001) concurrently; open http://localhost:5173
+npm run server:dev                      # server alone (tsx watch)
+npm run web:dev                         # frontend alone
+npm run build                           # vite build → web/dist/ (frontend only; server runs via tsx)
+npm start                               # production: tsx server/index.ts, serves web/dist/ + /api on $PORT
 ```
 
 Dev:
 ```
-npm run typecheck
-npm run build
-npm test
+npm run typecheck                       # tsc --noEmit on src/ + server/
+cd web && npx tsc --noEmit              # frontend typecheck
+npm test                                # vitest
 ```
+
+## Web UI ↔ pipeline contract
+- The UI's POST /api/runs takes a multipart CSV plus `accountPurpose` (string, optional) and `writeToAttio` (boolean, defaults to `false` from the UI). The server saves the CSV to `UPLOAD_DIR/<uuid>` (persistent volume on Railway), then either:
+  - **No resumable snapshot found** → returns `{ runId }` and kicks off `enrichAll` immediately.
+  - **Resumable snapshot found** → returns `{ runId, resumable: { snapshotId, stagesCompleted, … } }` *without* starting the run. The client then calls POST `/api/runs/:id/resume` (with the snapshotId) or POST `/api/runs/:id/start` (fresh). Both kick off `enrichAll` with the same params, the former passing `resumeCache` populated from the snapshot.
+- `enrichAll` accepts a `RunCtx { writeToAttio, emit, isCancelled, cancelSignal }`. Every Attio write site (`writeStageColumn`, `writeRejectionReasons`, score-stage `upsertCompanyByDomain` calls, identity-write block, the upfront `fetchAllRecords` prefetch) checks `ctx.writeToAttio` before hitting the network. Cache mutations and event emits happen regardless. Cancel races every API await against `cancelSignal` so in-flight HTTP calls stop blocking the pipeline.
+- After cache initialization (Attio prefetch / `resumeCache` / empty), `enrichAll` walks `attioCache` and emits a `cell-updated` event for every non-empty cell so the activity feed fully rehydrates from frame one — applies to both Attio resumes and snapshot resumes.
+- Pipeline events are consumed server-side: each `RunEvent` updates the run's `RunRecord` (current stage, ring buffer of recent activity, terminal counts). The frontend polls `GET /api/runs/:id/state` every second; the server returns a `RunStateSnapshot` with `Cache-Control: no-store`. The polling hook stops on terminal status (`completed` / `cancelled` / `failed`).
+- The downloadable CSV (`GET /api/runs/:id/csv`) is served from the in-memory `attioCache`, ordered by `CSV_COLUMN_ORDER` (see `server/columns.ts`).
+
+## Crash recovery (snapshot store)
+- A 1-second background flusher writes the live `attioCache` of every running run to `SNAPSHOT_DIR/<runId>.json` whenever the run's dirty flag is set (`server/snapshotStore.ts` + `server/index.ts`).
+- On the next CSV upload, the server matches the CSV's domain set against every saved snapshot. A match → resume banner in the UI. No match → fresh run.
+- Snapshot lifecycle: deleted on successful run-completed; kept on cancel/failure/crash; daily TTL sweep removes anything older than 7 days.
+- For Railway: mount a 1 GB persistent volume at `/data` and set `SNAPSHOT_DIR=/data/runs` and `UPLOAD_DIR=/data/uploads` so snapshots and uploads survive redeploys. Locally, both default to `tmp/runs/` and `tmp/uploads/`.
+
+## Deployment (Railway)
+- One container: Express on `process.env.PORT` serves `web/dist/` AND `/api/*`.
+- Build: `npm ci && npm run build` (vite build only — no server compile, runtime uses tsx).
+- Start: `npm start` (tsx server/index.ts).
+- Health: `/api/health`.
+- All existing pipeline env vars must be set in Railway (ATTIO_API_KEY, EXA_API_KEY, …). The `cache/` directory is ephemeral (perf cache only).
+- **Persistent volume required for crash-proof CSV-only runs.** Mount a 1 GB volume at `/data` in the Railway dashboard, then set:
+  - `SNAPSHOT_DIR=/data/runs` — disk-backed snapshots, ~1 MB per run
+  - `UPLOAD_DIR=/data/uploads` — uploaded CSVs (so a redeploy mid-run can still find the source)
+  - Without the volume, snapshots and uploads are wiped on every redeploy. The pipeline still works, just no resume across redeploys.
 
 ## Code Style
 - Strict TypeScript: `strict: true`, `noUncheckedIndexedAccess: true`
 - All imports use `.js` extension (ESM, `moduleResolution: Bundler`)
 - Column names are string literals — must match Attio exactly
 - Attio field slugs live in `attio.ts:FIELD_SLUGS` (never hardcode elsewhere)
-- All env values read through `KEYS` in `config.ts` — never access `process.env` directly
+- All env values read through `KEYS` in `config.ts` (server reads `process.env.PORT` and `NODE_ENV` directly — those are server-runtime, not pipeline config)
 - Enrichers: `(input: EnricherInput) => Promise<string>` — return `''` if unavailable
 - All outbound API calls must use their scheduler wrapper: `scheduleExa()`, `scheduleTheirstack()`, `scheduleApollo()`, `scheduleApify()`, `scheduleTwitterApi()`, `scheduleStatuspage()` — never call the underlying client directly
-- Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`)
+- Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`) AND respect `ctx.writeToAttio` from the active RunCtx
 - Azure OpenAI deployment for Stages 18/19/20 lives in `KEYS.azureOpenAIDeploymentPro` — never hardcode deployment names in stage files
 - TheirStack response parsing must check both `technology_slugs` and `technology_names` against machine-readable slug strings — both fields return slugs, never human-readable display names
 - No comments unless the WHY is non-obvious
+- The CSV column order in `server/columns.ts` is mirrored verbatim in `web/src/lib/columns.ts`. When changing one, update the other in the same commit.
 
 ## Testing
 Unit tests are the primary layer — one `*.test.ts` alongside each module. E2E tests in `enrichAll.e2e.test.ts` cover orchestration-only logic. Keep the E2E suite narrow: don't duplicate what unit tests already cover.
