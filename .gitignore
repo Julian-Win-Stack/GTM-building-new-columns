@@ -4,4 +4,6 @@ cache/
 data/input.csv
 .DS_Store
 dist/
+web/dist/
+tmp/
 .claude/plans/

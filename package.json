@@ -1,13 +1,17 @@
 {
   "name": "gtm-company-enrichment",
   "version": "0.1.0",
-  "description": "Backend script that enriches company data via Apify, Exa, TheirStack, and OpenAI, reading from input.csv and writing to output.csv with resumable state.",
+  "description": "Bacca enrichment pipeline + one-page web UI. Upload a CSV, optionally push to Attio, download the resulting enrichment as CSV.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
     "enrich-all": "tsx src/index.ts enrich-all",
+    "ui": "concurrently -k -n SERVER,WEB -c blue,magenta \"npm:server:dev\" \"npm:web:dev\"",
+    "server:dev": "tsx watch server/index.ts",
+    "web:dev": "vite --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts",
+    "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc",
     "test": "vitest run"
   },
   "engines": {
@@ -22,13 +26,25 @@
     "csv-stringify": "^6.5.0",
     "dotenv": "^16.4.5",
     "exa-js": "^2.11.0",
+    "express": "^4.21.2",
+    "multer": "^2.0.0",
     "openai": "^4.52.0",
-    "p-limit": "^5.0.0"
+    "p-limit": "^5.0.0",
+    "tsx": "^4.11.0"
   },
   "devDependencies": {
+    "@tanstack/react-table": "^8.21.3",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
     "@types/node": "^20.12.12",
-    "tsx": "^4.11.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.4.5",
+    "vite": "^6.0.0",
     "vitest": "^4.1.4"
   }
 }
