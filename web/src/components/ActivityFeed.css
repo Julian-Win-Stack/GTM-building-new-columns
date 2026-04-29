@@ -1,0 +1,182 @@
+.activity {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  padding: 18px 22px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 220px;
+}
+
+.activity__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  letter-spacing: 0.005em;
+  flex-wrap: wrap;
+}
+
+.activity__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  transition: background 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
+}
+
+.activity__pulse--fresh {
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-deep);
+  animation: pulse-soft 1.6s var(--ease-inout) infinite;
+}
+
+.activity__pulse--slow {
+  background: var(--warm);
+  box-shadow: 0 0 10px var(--warm-dim);
+  animation: pulse-soft 2.2s var(--ease-inout) infinite;
+}
+
+.activity__pulse--stuck {
+  background: var(--reject);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+  animation: pulse-soft 1.2s var(--ease-inout) infinite;
+}
+
+.activity__pulse--unknown {
+  background: var(--warm);
+  animation: pulse-soft 1.6s var(--ease-inout) infinite;
+}
+
+.activity__pulse--finished {
+  background: var(--text-muted);
+}
+
+.activity__label {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.activity--slow .activity__label {
+  color: var(--warm);
+}
+
+.activity--stuck .activity__label {
+  color: #FFA3A3;
+}
+
+.activity__sep {
+  color: var(--text-faint);
+  font-weight: 300;
+}
+
+.activity__caption {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.activity__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--hairline);
+  /* Bound the list height so an in-progress run never explodes the layout — older entries
+     just scroll out of view (the buffer caps at 12 anyway). */
+  max-height: 360px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Soft fade at the bottom so older entries seem to dissolve rather than hard-cut */
+.activity__list::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 28px;
+  background: linear-gradient(to bottom, transparent, var(--surface-1));
+  pointer-events: none;
+}
+
+.activity__empty {
+  padding: 16px 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-align: center;
+  font-style: italic;
+}
+
+.activity__row {
+  display: grid;
+  grid-template-columns: 64px 1fr 1fr;
+  gap: 14px;
+  padding: 9px 4px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  border-bottom: 1px solid var(--hairline);
+  align-items: baseline;
+  animation: activity-rise 320ms var(--ease-out);
+}
+
+.activity__row:last-child {
+  border-bottom: none;
+}
+
+.activity__when {
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum' 1;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.activity__company {
+  color: var(--text-primary);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity__col {
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity__row--reject .activity__col {
+  color: #FFA3A3;
+}
+
+@keyframes activity-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 720px) {
+  .activity__row {
+    grid-template-columns: 56px 1fr;
+    grid-template-rows: auto auto;
+  }
+  .activity__when {
+    grid-row: 1 / 3;
+  }
+  .activity__col {
+    grid-column: 2;
+  }
+}

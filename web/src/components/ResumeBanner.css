@@ -1,0 +1,57 @@
+.resume-banner {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-left: 2px solid var(--warm);
+  border-radius: var(--radius-lg);
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resume-banner__head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.resume-banner__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warm);
+  box-shadow: 0 0 10px var(--warm-dim);
+  animation: pulse-soft 2s var(--ease-inout) infinite;
+}
+
+.resume-banner__title {
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
+}
+
+.resume-banner__detail {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  letter-spacing: 0.005em;
+  padding-left: 18px;
+}
+
+.resume-banner__stage {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.resume-banner__sep {
+  color: var(--text-faint);
+  margin: 0 8px;
+}
+
+.resume-banner__actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
