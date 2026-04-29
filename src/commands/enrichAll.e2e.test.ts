@@ -326,7 +326,7 @@ describe('input routing', () => {
     expect(domains).toContain('acme.com');
   });
 
-  it('calls upsertByLinkedInUrl for LinkedIn-only row that cannot be resolved', async () => {
+  it('skips a LinkedIn-only row with no website at preflight — no Attio writes, no stage calls', async () => {
     const csvPath = await makeCsv(tmpDir, [
       {
         'Company Name': 'Ghost Co',
@@ -335,16 +335,12 @@ describe('input routing', () => {
         'Short Description': 'Mystery company',
       },
     ]);
-    // Attio cache has no matching record
     m.fetchAllRecords.mockResolvedValue(new Map());
 
     await enrichAll({ csv: csvPath, skipConfirm: true });
 
-    // Identity write goes through upsertByLinkedIn
-    expect(m.upsertByLinkedIn).toHaveBeenCalledWith(
-      expect.objectContaining({ 'LinkedIn Page': 'https://linkedin.com/company/ghost-co' })
-    );
-    // No domain available → no stage API calls
+    expect(m.upsertByDomain).not.toHaveBeenCalled();
+    expect(m.upsertByLinkedIn).not.toHaveBeenCalled();
     expect(m.digitalNativeExaSearch).not.toHaveBeenCalled();
   });
 
