@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { StageResult } from './stages/types.js';
+import type { RunCtx } from './runTypes.js';
 
 const upsertMock = vi.fn();
 
@@ -8,6 +9,8 @@ vi.mock('./apis/attio.js', () => ({
 }));
 
 const { writeStageColumn } = await import('./writeStageColumn.js');
+
+const ctx: RunCtx = { writeToAttio: true, emit: () => {} };
 
 beforeEach(() => {
   upsertMock.mockReset().mockResolvedValue({ id: 'rec_1', values: {} });
@@ -22,7 +25,7 @@ describe('writeStageColumn', () => {
     const results: StageResult<{ x: string }>[] = [
       { company: { companyName: 'Acme', domain: 'acme.com' }, data: { x: 'foo' } },
     ];
-    await writeStageColumn('Digital Native', results, (d) => `fmt:${d.x}`);
+    await writeStageColumn('Digital Native', results, (d) => `fmt:${d.x}`, ctx);
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock).toHaveBeenCalledWith({
       'Company Name': 'Acme',
@@ -36,7 +39,7 @@ describe('writeStageColumn', () => {
       { company: { companyName: 'Acme', domain: 'acme.com' }, error: 'nope' },
       { company: { companyName: 'Beta', domain: 'beta.io' }, data: { x: 'y' } },
     ];
-    await writeStageColumn('Digital Native', results, (d) => d.x);
+    await writeStageColumn('Digital Native', results, (d) => d.x, ctx);
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock.mock.calls[0]![0]).toMatchObject({ Domain: 'beta.io' });
   });
@@ -46,7 +49,7 @@ describe('writeStageColumn', () => {
       { company: { companyName: 'Acme', domain: 'acme.com' }, error: 'e1' },
       { company: { companyName: 'Beta', domain: 'beta.io' }, error: 'e2' },
     ];
-    await writeStageColumn('Digital Native', results, (d) => d.x);
+    await writeStageColumn('Digital Native', results, (d) => d.x, ctx);
     expect(upsertMock).not.toHaveBeenCalled();
   });
 
@@ -54,7 +57,7 @@ describe('writeStageColumn', () => {
     const results: StageResult<{ x: string }>[] = [
       { company: { companyName: 'Acme', domain: 'acme.com' }, data: { x: '' } },
     ];
-    await writeStageColumn('Digital Native', results, (d) => d.x);
+    await writeStageColumn('Digital Native', results, (d) => d.x, ctx);
     expect(upsertMock).toHaveBeenCalledWith(
       expect.objectContaining({ 'Digital Native': '' })
     );
@@ -66,7 +69,7 @@ describe('writeStageColumn', () => {
       { company: { companyName: 'Acme', domain: 'acme.com' }, data: { x: 'a' } },
       { company: { companyName: 'Beta', domain: 'beta.io' }, error: 'e' },
     ];
-    await writeStageColumn('Digital Native', results, (d) => d.x);
+    await writeStageColumn('Digital Native', results, (d) => d.x, ctx);
     const line = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(line).toContain('written=1');
     expect(line).toContain('skipped=1');
@@ -83,7 +86,7 @@ describe('writeStageColumn', () => {
       { company: { companyName: 'Acme', domain: 'acme.com' }, data: { x: 'a' } },
       { company: { companyName: 'Beta', domain: 'beta.io' }, data: { x: 'b' } },
     ];
-    await expect(writeStageColumn('Digital Native', results, (d) => d.x)).resolves.toBeUndefined();
+    await expect(writeStageColumn('Digital Native', results, (d) => d.x, ctx)).resolves.toBeUndefined();
     expect(upsertMock).toHaveBeenCalledTimes(2);
     const errLine = errSpy.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(errLine).toContain('acme.com');
@@ -99,7 +102,7 @@ describe('writeStageColumn', () => {
       { company: { companyName: 'Acme', domain: 'acme.com' }, data: { x: 'a' } },
       { company: { companyName: 'Beta', domain: 'beta.io' }, data: { x: 'b' } },
     ];
-    await writeStageColumn('Digital Native', results, (d) => d.x);
+    await writeStageColumn('Digital Native', results, (d) => d.x, ctx);
     const summary = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(summary).toContain('written=0');
     expect(summary).toContain('failed=2');

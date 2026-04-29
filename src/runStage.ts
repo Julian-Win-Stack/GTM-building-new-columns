@@ -27,6 +27,11 @@ type RunStageOptions<TRaw, TData> = {
   parse: (raw: TRaw, batch: StageCompany[]) => StageResult<TData>[] | Promise<StageResult<TData>[]>;
   afterBatch?: (batchResults: StageResult<TData>[]) => Promise<void>;
   retry?: { tries: number; baseMs: number };
+  // Hard cancellation. `isCancelled` is checked before each batch attempt. `cancelSignal` is
+  // raced against the API call itself so in-flight HTTP requests stop blocking the pipeline
+  // immediately on user cancel.
+  isCancelled?: () => boolean;
+  cancelSignal?: Promise<never>;
 };
 
 async function runOneBatch<TRaw, TData>(
@@ -34,16 +39,32 @@ async function runOneBatch<TRaw, TData>(
   batch: StageCompany[],
   call: (domains: string[]) => Promise<TRaw>,
   parse: (raw: TRaw, batch: StageCompany[]) => StageResult<TData>[] | Promise<StageResult<TData>[]>,
-  retry: { tries: number; baseMs: number }
+  retry: { tries: number; baseMs: number },
+  isCancelled?: () => boolean,
+  cancelSignal?: Promise<never>
 ): Promise<StageResult<TData>[]> {
   const domains = batch.map((c) => c.domain);
+  if (isCancelled?.()) {
+    return batch.map((company) => ({ company, error: 'cancelled' }));
+  }
   let lastErr: unknown;
   for (let attempt = 0; attempt < retry.tries; attempt++) {
+    if (isCancelled?.()) {
+      return batch.map((company) => ({ company, error: 'cancelled' }));
+    }
     try {
-      const raw = await call(domains);
-      return await parse(raw, batch);
+      const raw = cancelSignal
+        ? await Promise.race([call(domains), cancelSignal])
+        : await call(domains);
+      // parse may itself await API calls (e.g. score stages 18–21 do their OpenAI work in
+      // parse, not in call). Race it too so cancel actually unblocks every stage.
+      const parsed = Promise.resolve(parse(raw, batch));
+      return await (cancelSignal ? Promise.race([parsed, cancelSignal]) : parsed);
     } catch (err) {
       lastErr = err;
+      if (isCancelled?.()) {
+        return batch.map((company) => ({ company, error: 'cancelled' }));
+      }
       const msg = err instanceof Error ? err.message : String(err);
       const wait = retryWaitMs(err, attempt, retry.baseMs);
       const isLast = attempt === retry.tries - 1 || wait === null;
@@ -54,7 +75,12 @@ async function runOneBatch<TRaw, TData>(
       console.warn(
         `[${name}] batch attempt ${attempt + 1}/${retry.tries} failed (${domains.join(', ')}): ${msg}. waiting ${wait}ms`
       );
-      await new Promise((r) => setTimeout(r, wait));
+      try {
+        const wait_ = new Promise((r) => setTimeout(r, wait));
+        await (cancelSignal ? Promise.race([wait_, cancelSignal]) : wait_);
+      } catch {
+        return batch.map((company) => ({ company, error: 'cancelled' }));
+      }
     }
   }
   const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
@@ -77,9 +103,17 @@ export async function runStage<TRaw, TData>(
   const perBatch: StageResult<TData>[][] = new Array(batches.length);
   await Promise.all(
     batches.map(async (batch, i) => {
-      const results = await runOneBatch(name, batch, call, parse, retry);
+      const results = await runOneBatch(
+        name,
+        batch,
+        call,
+        parse,
+        retry,
+        opts.isCancelled,
+        opts.cancelSignal
+      );
       perBatch[i] = results;
-      if (afterBatch) {
+      if (afterBatch && !opts.isCancelled?.()) {
         try {
           await afterBatch(results);
         } catch (err) {

@@ -259,6 +259,105 @@ describe('runStage', () => {
     expect(out[0]!.data).toBe('ok');
   });
 
+  it('aborts in-flight call() awaits when cancelSignal rejects', async () => {
+    const companies = makeCompanies(4);
+    let triggerCancel: () => void = () => {};
+    const cancelSignal = new Promise<never>((_, reject) => {
+      triggerCancel = () => reject(new Error('run cancelled'));
+    });
+    cancelSignal.catch(() => {});
+    let isCancelledFlag = false;
+    const isCancelled = () => isCancelledFlag;
+
+    // call() never resolves on its own — cancelSignal MUST be what unblocks the await
+    const call = vi.fn(() => new Promise<string>(() => {}));
+    const parse = vi.fn().mockImplementation((_raw: string, batch: StageCompany[]) =>
+      batch.map<StageResult<string>>((c) => ({ company: c, data: 'ok' }))
+    );
+
+    const promise = runStage({
+      name: 's',
+      companies,
+      batchSize: 1,
+      call,
+      parse,
+      isCancelled,
+      cancelSignal,
+    });
+
+    // give microtasks a chance to start the calls
+    await Promise.resolve();
+    isCancelledFlag = true;
+    triggerCancel();
+
+    const out = await promise;
+    expect(out).toHaveLength(4);
+    expect(out.every((r) => r.error === 'cancelled')).toBe(true);
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it('aborts parse() awaits when cancelSignal rejects (score-stage pattern)', async () => {
+    // Mirrors stages 18–21: call returns instantly, all the work happens in parse.
+    const companies = makeCompanies(4);
+    let triggerCancel: () => void = () => {};
+    const cancelSignal = new Promise<never>((_, reject) => {
+      triggerCancel = () => reject(new Error('run cancelled'));
+    });
+    cancelSignal.catch(() => {});
+    let isCancelledFlag = false;
+    const isCancelled = () => isCancelledFlag;
+
+    const call = vi.fn().mockResolvedValue('raw');
+    // parse mimics an OpenAI await that never resolves on its own
+    const parse = vi.fn(
+      (_raw: string, _batch: StageCompany[]) => new Promise<StageResult<string>[]>(() => {})
+    );
+
+    const promise = runStage({
+      name: 's',
+      companies,
+      batchSize: 1,
+      call,
+      parse,
+      isCancelled,
+      cancelSignal,
+    });
+
+    // let calls + parses start
+    await new Promise((r) => setTimeout(r, 10));
+    isCancelledFlag = true;
+    triggerCancel();
+
+    const out = await promise;
+    expect(out).toHaveLength(4);
+    expect(out.every((r) => r.error === 'cancelled')).toBe(true);
+  });
+
+  it('skips afterBatch when isCancelled flips between runOneBatch and afterBatch', async () => {
+    const companies = makeCompanies(2);
+    let isCancelledFlag = false;
+    const isCancelled = () => isCancelledFlag;
+    const call = vi.fn().mockImplementation(async () => {
+      isCancelledFlag = true; // user clicks cancel mid-batch
+      return 'raw';
+    });
+    const parse = vi.fn().mockImplementation((_raw: string, batch: StageCompany[]) =>
+      batch.map<StageResult<string>>((c) => ({ company: c, data: 'ok' }))
+    );
+    const afterBatch = vi.fn().mockResolvedValue(undefined);
+
+    await runStage({
+      name: 's',
+      companies,
+      batchSize: 1,
+      call,
+      parse,
+      afterBatch,
+      isCancelled,
+    });
+    expect(afterBatch).not.toHaveBeenCalled();
+  });
+
   it('swallows afterBatch throws so one bad write does not abort the stage', async () => {
     const companies = makeCompanies(4);
     const call = vi.fn().mockResolvedValue('raw');
