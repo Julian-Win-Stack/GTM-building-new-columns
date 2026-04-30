@@ -103,7 +103,7 @@ export function ControlDeck({ disabled, onSubmit }: Props) {
 
       {mode === 'csv' ? (
         <div className="ctrl__grid">
-          <label className="ctrl__field ctrl__field--file">
+          <div className="ctrl__field ctrl__field--file">
             <span className="ctrl__label">Source CSV</span>
             <div
               className={`drop ${dragOver ? 'drop--over' : ''} ${file ? 'drop--has-file' : ''}`}
@@ -149,7 +149,7 @@ export function ControlDeck({ disabled, onSubmit }: Props) {
                 }}
               />
             </div>
-          </label>
+          </div>
 
           <label className="ctrl__field">
             <span className="ctrl__label">
