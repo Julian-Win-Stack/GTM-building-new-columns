@@ -185,7 +185,12 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   const csvIdentities: CsvIdentity[] = [];
   const companies: StageCompany[] = [];
   const linkedinByDomain = new Map<string, string>();
-  const skippedRows: Array<{ name: string; linkedinUrl?: string; missingApolloId: boolean }> = [];
+  const skippedRows: Array<{
+    name: string;
+    hasWebsite: boolean;
+    hasLinkedin: boolean;
+    missingApolloId: boolean;
+  }> = [];
   const missingApolloIdRows: Array<{ name: string; domain: string }> = [];
 
   for (const raw of subset) {
@@ -197,15 +202,20 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     const description = row['Short Description'] ?? '';
     const apolloId = (row['Apollo Account Id'] ?? '').trim();
 
-    if (!domain) {
-      skippedRows.push({ name: name || '(unknown)', linkedinUrl: linkedinUrl || undefined, missingApolloId: !apolloId });
+    if (!domain || !linkedinUrl) {
+      skippedRows.push({
+        name: name || '(unknown)',
+        hasWebsite: Boolean(domain),
+        hasLinkedin: Boolean(linkedinUrl),
+        missingApolloId: !apolloId,
+      });
       continue;
     }
 
     const identity: CsvIdentity = { name, domain, linkedinUrl, description, website, apolloId };
     csvIdentities.push(identity);
     companies.push({ companyName: name, domain });
-    if (linkedinUrl) linkedinByDomain.set(domain, linkedinUrl);
+    linkedinByDomain.set(domain, linkedinUrl);
     if (!apolloId) missingApolloIdRows.push({ name: name || domain, domain });
   }
 
@@ -223,10 +233,9 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   } else {
     if (skippedRows.length > 0) {
       console.log(`[preflight] ${skippedRows.length} ${skippedRows.length === 1 ? 'row' : 'rows'} will be skipped:`);
-      const sortedSkipped = [...skippedRows].sort((a, b) => (b.linkedinUrl ? 1 : 0) - (a.linkedinUrl ? 1 : 0));
-      for (const s of sortedSkipped) {
+      for (const s of skippedRows) {
         const apolloNote = s.missingApolloId ? ' (also doesn\'t have Apollo ID)' : '';
-        console.log(`  - "${s.name}"${s.linkedinUrl ? ` [${s.linkedinUrl}]` : ''}${apolloNote}`);
+        console.log(`  - "${s.name}" — ${skipReason(s)}${apolloNote}`);
       }
       const usableCount = subset.length - skippedRows.length;
       console.log(`[preflight] ${usableCount} ${usableCount === 1 ? 'company' : 'companies'} from CSV will be processed.`);
@@ -1320,12 +1329,19 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   return attioCache;
 }
 
-function skipReason(s: { name: string; linkedinUrl?: string; missingApolloId: boolean }): string {
+function skipReason(s: {
+  name: string;
+  hasWebsite: boolean;
+  hasLinkedin: boolean;
+  missingApolloId: boolean;
+}): string {
   const parts: string[] = [];
-  if (s.linkedinUrl) {
+  if (!s.hasWebsite && !s.hasLinkedin) {
+    parts.push('Missing Website and LinkedIn URL');
+  } else if (!s.hasWebsite) {
     parts.push('Missing Website (no domain available)');
   } else {
-    parts.push('Missing Website and LinkedIn URL');
+    parts.push('Missing LinkedIn URL');
   }
   if (s.missingApolloId) parts.push('no Apollo ID');
   return parts.join(' · ');

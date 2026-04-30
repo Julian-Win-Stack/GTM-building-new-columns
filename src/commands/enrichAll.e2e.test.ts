@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeCsv, makeExaResponse, makeExaTextResponse } from './enrichAll.e2e.helpers.js';
 import { computeInputHash } from '../stages/companyContextScore.js';
+import type { RunEvent } from '../runTypes.js';
 
 // ---------------------------------------------------------------------------
 // 1. Pre-import env setup — must run before any module is loaded
@@ -458,7 +459,7 @@ describe('input routing', () => {
       {
         'Company Name': 'Acme Corp',
         Website: 'acme.com',
-        'Company Linkedin Url': '',
+        'Company Linkedin Url': 'https://linkedin.com/company/acme',
         'Short Description': 'A SaaS company',
       },
     ]);
@@ -645,7 +646,7 @@ describe('Stage 16 competitor shortcut', () => {
 describe('rejection propagation', () => {
   it('Stage 2 rejection stops the company from reaching Stage 3+, writes rejection reason', async () => {
     const csvPath = await makeCsv(tmpDir, [
-      { 'Company Name': 'Reject Co', Website: 'reject.com', 'Company Linkedin Url': '', 'Short Description': '' },
+      { 'Company Name': 'Reject Co', Website: 'reject.com', 'Company Linkedin Url': 'https://linkedin.com/company/reject-co', 'Short Description': '' },
     ]);
 
     // Stage 2 returns NOT Digital-native or digitally critical → should be rejected
@@ -686,7 +687,7 @@ describe('rejection propagation', () => {
 describe('cache-gate', () => {
   it('Stage 2 cached rejection skips fresh Exa call and writes rejection reason', async () => {
     const csvPath = await makeCsv(tmpDir, [
-      { 'Company Name': 'Stale Co', Website: 'stale.com', 'Company Linkedin Url': '', 'Short Description': '' },
+      { 'Company Name': 'Stale Co', Website: 'stale.com', 'Company Linkedin Url': 'https://linkedin.com/company/stale-co', 'Short Description': '' },
     ]);
 
     // Attio already has Digital Native = "NOT Digital-native or digitally critical …"
@@ -769,7 +770,7 @@ describe('Stage 3 conditional gate', () => {
   for (const tc of cases) {
     it(tc.label, async () => {
       const csvPath = await makeCsv(tmpDir, [
-        { 'Company Name': 'Test Co', Website: tc.domain, 'Company Linkedin Url': '', 'Short Description': '' },
+        { 'Company Name': 'Test Co', Website: tc.domain, 'Company Linkedin Url': 'https://linkedin.com/company/test-co', 'Short Description': '' },
       ]);
 
       m.digitalNativeExaSearch.mockResolvedValue(
@@ -848,27 +849,63 @@ describe('Stage 3 conditional gate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 8a — Stage 10 N/A branch
+// Group 8a — Preflight LinkedIn URL gate
 // ---------------------------------------------------------------------------
-describe('Stage 10 N/A branch', () => {
-  it('writes N/A and skips Apify when company has no LinkedIn URL', async () => {
+describe('Preflight LinkedIn URL gate', () => {
+  it('skips rows missing LinkedIn URL and surfaces them on the run-started event', async () => {
     const csvPath = await makeCsv(tmpDir, [
-      // No LinkedIn URL in CSV
-      { 'Company Name': 'No-LI Co', Website: 'no-li.com', 'Company Linkedin Url': '', 'Short Description': '' },
+      { 'Company Name': 'No-LI Co', Website: 'no-li.com', 'Company Linkedin Url': '', 'Short Description': '', 'Apollo Account Id': 'apollo-no-li' },
+      { 'Company Name': 'Has-LI Co', Website: 'has-li.com', 'Company Linkedin Url': 'https://linkedin.com/company/has-li', 'Short Description': '', 'Apollo Account Id': 'apollo-has-li' },
     ]);
-    defaultExaMocks(['no-li.com']);
+    defaultExaMocks(['has-li.com']);
 
-    await enrichAll({ csv: csvPath, skipConfirm: true });
+    const events: RunEvent[] = [];
+    await enrichAll({
+      csv: csvPath,
+      skipConfirm: true,
+      onEvent: (e) => events.push(e),
+    });
 
-    // Apify harvest should NOT be called
-    expect(m.runHarvestLinkedInEmployees).not.toHaveBeenCalled();
-
-    // 'Number of SREs' column must be written as 'N/A'
-    const sreCall = m.upsertByDomain.mock.calls.find(
-      (c: unknown[]) => (c[0] as Record<string, unknown>)?.['Number of SREs'] !== undefined
+    const started = events.find(
+      (e): e is Extract<RunEvent, { type: 'run-started' }> => e.type === 'run-started'
     );
-    expect(sreCall).toBeDefined();
-    expect((sreCall![0] as Record<string, unknown>)['Number of SREs']).toBe('N/A');
+    expect(started).toBeDefined();
+    expect(started?.totalCompanies).toBe(1);
+    expect(started?.skippedRows).toEqual([
+      { name: 'No-LI Co', reason: 'Missing LinkedIn URL' },
+    ]);
+
+    // No Apify or Attio writes for the skipped row's domain.
+    expect(m.runHarvestLinkedInEmployees).not.toHaveBeenCalledWith(
+      expect.objectContaining({ linkedinUrl: expect.stringContaining('no-li') })
+    );
+    const upsertedDomains = m.upsertByDomain.mock.calls.map(
+      (c: unknown[]) => (c[0] as Record<string, unknown>)?.['Domain']
+    );
+    expect(upsertedDomains).not.toContain('no-li.com');
+  });
+
+  it('skips rows missing both Website and LinkedIn URL with a combined reason', async () => {
+    const csvPath = await makeCsv(tmpDir, [
+      { 'Company Name': 'Empty Co', Website: '', 'Company Linkedin Url': '', 'Short Description': '', 'Apollo Account Id': 'apollo-empty' },
+      { 'Company Name': 'Good Co', Website: 'good.com', 'Company Linkedin Url': 'https://linkedin.com/company/good', 'Short Description': '', 'Apollo Account Id': 'apollo-good' },
+    ]);
+    defaultExaMocks(['good.com']);
+
+    const events: RunEvent[] = [];
+    await enrichAll({
+      csv: csvPath,
+      skipConfirm: true,
+      onEvent: (e) => events.push(e),
+    });
+
+    const started = events.find(
+      (e): e is Extract<RunEvent, { type: 'run-started' }> => e.type === 'run-started'
+    );
+    expect(started?.totalCompanies).toBe(1);
+    expect(started?.skippedRows).toEqual([
+      { name: 'Empty Co', reason: 'Missing Website and LinkedIn URL' },
+    ]);
   });
 });
 
@@ -881,7 +918,7 @@ describe('Stage 11+12 union-skip', () => {
       {
         'Company Name': 'Half Co',
         Website: 'half.com',
-        'Company Linkedin Url': '',
+        'Company Linkedin Url': 'https://linkedin.com/company/half-co',
         'Short Description': '',
       },
     ]);
@@ -947,7 +984,7 @@ const ALL_17_COLS: Record<string, string> = {
 describe('Stage 18 hash-gate', () => {
   it('re-scores when stored hash is stale', async () => {
     const csvPath = await makeCsv(tmpDir, [
-      { 'Company Name': 'Hash Co', Website: 'hash.com', 'Company Linkedin Url': '', 'Short Description': '' },
+      { 'Company Name': 'Hash Co', Website: 'hash.com', 'Company Linkedin Url': 'https://linkedin.com/company/hash-co', 'Short Description': '' },
     ]);
     m.fetchAllRecords.mockResolvedValue(
       new Map([
@@ -975,7 +1012,7 @@ describe('Stage 18 hash-gate', () => {
 
   it('skips Stage 18 when hash matches stored value', async () => {
     const csvPath = await makeCsv(tmpDir, [
-      { 'Company Name': 'Hash Co', Website: 'hash.com', 'Company Linkedin Url': '', 'Short Description': '' },
+      { 'Company Name': 'Hash Co', Website: 'hash.com', 'Company Linkedin Url': 'https://linkedin.com/company/hash-co', 'Short Description': '' },
     ]);
     const correctHash = computeInputHash(ALL_17_COLS, ENRICHABLE_SLUGS_FOR_HASH);
     m.fetchAllRecords.mockResolvedValue(

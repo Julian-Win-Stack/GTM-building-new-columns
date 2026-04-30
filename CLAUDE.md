@@ -146,7 +146,7 @@ Flow: load CSV → pre-fetch ALL Attio records → merge processing set (CSV ∪
 - **Stages 18/19/20** all operate on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty. Independent of each other.
 - **Stage 21** additionally requires all 3 upstream score columns non-empty; runs after 18/19/20.
 - **Identity-write** runs before Stage 1: fills empty Attio columns from CSV (never overwrites). Match by Domain only.
-- **Preflight** runs before identity-write: scans the CSV (after `--limit` is applied), reports rows that will be skipped (no Website — LinkedIn-only rows are skipped too), then waits 3 seconds for Ctrl-C before any Attio writes happen. Tests bypass via the internal `skipConfirm` option.
+- **Preflight** runs before identity-write: scans the CSV (after `--limit` is applied), reports rows that will be skipped — a row needs **both** `Website` and `Company Linkedin Url` to be processed; rows missing either (or both) are dropped with a reason ("Missing Website (no domain available)", "Missing LinkedIn URL", or "Missing Website and LinkedIn URL"). Skip reasons are emitted on the `run-started` event so the web UI can show them in the SkippedPanel. Then waits 3 seconds for Ctrl-C before any Attio writes happen. Tests bypass via the internal `skipConfirm` option.
 
 See `docs/formats.md` for per-column Attio value formats, hash-gating details, and API mapping.
 
