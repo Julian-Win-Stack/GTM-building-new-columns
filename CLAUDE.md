@@ -1,6 +1,6 @@
 # Project
 **Bacca.ai** is an AI SRE startup that sells software to high-scale digital-native platforms. This repo enriches potential customers (from a CSV) via Apify, Exa, TheirStack, twitterapi.io, Statuspage, Apollo, and Azure OpenAI, scoring each company against Bacca's ICP. Two surfaces share the same pipeline:
-- **CLI (`./enrich`)** — the original automation entry point. Always writes results to the Attio custom object (`ranked_companies`).
+- **CLI (`./enrich`)** — the original automation entry point. Always writes results to the Attio custom object (`companies`).
 - **Web UI (`npm run ui`, deployed to Railway)** — a one-page React app for CEO / GTM leads / GTM interns. Upload a CSV, optionally toggle Attio sync, watch rows fill in stage by stage, download a CSV.
 
 ## Stack
@@ -226,7 +226,7 @@ See `docs/testing.md` for full rules, scope boundaries, and the commit workflow.
 ## Rules
 - Never commit `.env` — only `.env.example`
 - All secrets in `.env`, read via `KEYS` in `config.ts`
-- `ATTIO_OBJECT_SLUG` defaults to `ranked_companies`; overridable via `.env`
+- The Attio object slug (`companies`) is hardcoded as `ATTIO_OBJECT_SLUG` in `src/apis/attio.ts` — not env-driven, since the slug names in `FIELD_SLUGS` are tightly coupled to that specific object's schema
 - Adding a new enrichable column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `attio.ts:FIELD_SLUGS` — see `docs/adding-columns.md` for full checklist including score columns and circular dependency exclusions
 - Never make business logic decisions without asking the user first
 - `toAttioValues` skips empty strings — enrichers must return `''` not `null`/`undefined`

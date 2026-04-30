@@ -2,9 +2,11 @@ import axios from 'axios';
 import { KEYS } from '../config.js';
 import type { AttioRecord, EnrichmentResult } from '../types.js';
 
+export const ATTIO_OBJECT_SLUG = 'companies';
+
 export const FIELD_SLUGS: Record<string, string> = {
   'Company Name': 'company_name',
-  'Domain': 'domain',
+  'Domain': 'domains',
   'LinkedIn Page': 'linkedin_page',
   'Description': 'description',
   'Website': 'website',
@@ -58,7 +60,7 @@ type RawAttioField = Array<{ value?: string; domain_name?: string }>;
 type RawAttioRecord = { id: { record_id: string } | string; values: Record<string, RawAttioField> };
 
 function extractDomain(rec: RawAttioRecord): string {
-  const arr = rec.values?.['domain'];
+  const arr = rec.values?.['domains'];
   return arr?.[0]?.domain_name ?? arr?.[0]?.value ?? '';
 }
 
@@ -81,7 +83,7 @@ export async function fetchAllRecords(
   const limit = 500;
 
   while (true) {
-    const res = await client.post(`/objects/${KEYS.attioObjectSlug}/records/query`, { limit, offset });
+    const res = await client.post(`/objects/${ATTIO_OBJECT_SLUG}/records/query`, { limit, offset });
     const records = (res.data?.data ?? []) as RawAttioRecord[];
     if (records.length === 0) break;
 
@@ -100,8 +102,8 @@ export async function fetchAllRecords(
 }
 
 export async function findCompanyByDomain(domain: string): Promise<AttioRecord | null> {
-  const res = await http.post(`/objects/${KEYS.attioObjectSlug}/records/query`, {
-    filter: { domain: { $eq: domain } },
+  const res = await http.post(`/objects/${ATTIO_OBJECT_SLUG}/records/query`, {
+    filter: { domains: { $eq: domain } },
     limit: 1,
   });
   const rec = res.data?.data?.[0];
@@ -110,22 +112,22 @@ export async function findCompanyByDomain(domain: string): Promise<AttioRecord |
 
 export async function createCompany(data: Partial<EnrichmentResult>): Promise<AttioRecord> {
   const values = toAttioValues(data);
-  const res = await http.post(`/objects/${KEYS.attioObjectSlug}/records`, { data: { values } });
+  const res = await http.post(`/objects/${ATTIO_OBJECT_SLUG}/records`, { data: { values } });
   const rec = res.data?.data;
   return { id: rec.id?.record_id ?? rec.id, values: rec.values ?? {} };
 }
 
 export async function updateCompany(recordId: string, data: Partial<EnrichmentResult>): Promise<void> {
   const values = toAttioValues(data);
-  await http.patch(`/objects/${KEYS.attioObjectSlug}/records/${recordId}`, { data: { values } });
+  await http.patch(`/objects/${ATTIO_OBJECT_SLUG}/records/${recordId}`, { data: { values } });
 }
 
 export async function upsertCompanyByDomain(data: Partial<EnrichmentResult>): Promise<AttioRecord> {
   const values = toAttioValues(data);
   const res = await http.put(
-    `/objects/${KEYS.attioObjectSlug}/records`,
+    `/objects/${ATTIO_OBJECT_SLUG}/records`,
     { data: { values } },
-    { params: { matching_attribute: 'domain' } }
+    { params: { matching_attribute: 'domains' } }
   );
   const rec = res.data?.data;
   return { id: rec.id?.record_id ?? rec.id, values: rec.values ?? {} };
@@ -134,7 +136,7 @@ export async function upsertCompanyByDomain(data: Partial<EnrichmentResult>): Pr
 export async function upsertCompanyByLinkedInUrl(data: Partial<EnrichmentResult>): Promise<AttioRecord> {
   const values = toAttioValues(data);
   const res = await http.put(
-    `/objects/${KEYS.attioObjectSlug}/records`,
+    `/objects/${ATTIO_OBJECT_SLUG}/records`,
     { data: { values } },
     { params: { matching_attribute: 'linkedin_page' } }
   );

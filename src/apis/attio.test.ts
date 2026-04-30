@@ -29,7 +29,7 @@ describe('findCompanyByDomain', () => {
     await findCompanyByDomain('acme.com');
     expect(httpMock.post).toHaveBeenCalledWith(
       expect.stringMatching(/\/objects\/.+\/records\/query$/),
-      { filter: { domain: { $eq: 'acme.com' } }, limit: 1 }
+      { filter: { domains: { $eq: 'acme.com' } }, limit: 1 }
     );
   });
 
@@ -45,15 +45,15 @@ describe('findCompanyByDomain', () => {
 
   it('extracts the record_id shape into .id', async () => {
     httpMock.post.mockResolvedValue({
-      data: { data: [{ id: { record_id: 'rec_123' }, values: { domain: 'acme.com' } }] },
+      data: { data: [{ id: { record_id: 'rec_123' }, values: { domains: 'acme.com' } }] },
     });
     const out = await findCompanyByDomain('acme.com');
-    expect(out).toEqual({ id: 'rec_123', values: { domain: 'acme.com' } });
+    expect(out).toEqual({ id: 'rec_123', values: { domains: 'acme.com' } });
   });
 
   it('falls back to a plain id when record_id shape is absent', async () => {
     httpMock.post.mockResolvedValue({
-      data: { data: [{ id: 'rec_plain', values: { domain: 'acme.com' } }] },
+      data: { data: [{ id: 'rec_plain', values: { domains: 'acme.com' } }] },
     });
     const out = await findCompanyByDomain('acme.com');
     expect(out?.id).toBe('rec_plain');
@@ -82,7 +82,7 @@ describe('createCompany', () => {
         data: {
           values: {
             company_name: 'Acme',
-            domain: 'acme.com',
+            domains: 'acme.com',
             digital_native: 'Digital-native B2C',
           },
         },
@@ -133,7 +133,7 @@ describe('fetchAllRecords', () => {
     return {
       id: { record_id: `rec_${domain}` },
       values: {
-        domain: [{ domain_name: domain }],
+        domains: [{ domain_name: domain }],
         ...extraValues,
       },
     };
@@ -227,11 +227,11 @@ describe('fetchAllRecords', () => {
 });
 
 describe('upsertCompanyByDomain', () => {
-  it('PUTs with matching_attribute=domain query param', async () => {
+  it('PUTs with matching_attribute=domains query param', async () => {
     httpMock.put.mockResolvedValue({ data: { data: { id: 'rec_1', values: {} } } });
     await upsertCompanyByDomain({ 'Company Name': 'Acme', Domain: 'acme.com' });
     const [, , config] = httpMock.put.mock.calls[0]!;
-    expect(config).toEqual({ params: { matching_attribute: 'domain' } });
+    expect(config).toEqual({ params: { matching_attribute: 'domains' } });
   });
 
   it('sends the values body with mapped slugs', async () => {
@@ -239,7 +239,7 @@ describe('upsertCompanyByDomain', () => {
     await upsertCompanyByDomain({ 'Company Name': 'Acme', Domain: 'acme.com' });
     const [, body] = httpMock.put.mock.calls[0]!;
     expect(body).toEqual({
-      data: { values: { company_name: 'Acme', domain: 'acme.com' } },
+      data: { values: { company_name: 'Acme', domains: 'acme.com' } },
     });
   });
 
@@ -247,15 +247,15 @@ describe('upsertCompanyByDomain', () => {
     httpMock.put.mockResolvedValue({ data: { data: { id: 'rec_1', values: {} } } });
     await upsertCompanyByDomain({ Domain: 'acme.com', Description: 'A widget company' });
     const [, body] = httpMock.put.mock.calls[0]!;
-    expect(body.data.values).toEqual({ domain: 'acme.com', description: 'A widget company' });
+    expect(body.data.values).toEqual({ domains: 'acme.com', description: 'A widget company' });
   });
 
   it('returns the upserted record', async () => {
     httpMock.put.mockResolvedValue({
-      data: { data: { id: { record_id: 'rec_9' }, values: { domain: 'acme.com' } } },
+      data: { data: { id: { record_id: 'rec_9' }, values: { domains: 'acme.com' } } },
     });
     const out = await upsertCompanyByDomain({ Domain: 'acme.com' });
-    expect(out).toEqual({ id: 'rec_9', values: { domain: 'acme.com' } });
+    expect(out).toEqual({ id: 'rec_9', values: { domains: 'acme.com' } });
   });
 });
 

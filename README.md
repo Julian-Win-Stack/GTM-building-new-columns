@@ -1,6 +1,6 @@
 # GTM Company Enrichment
 
-This CLI enriches prospective customers for Bacca.ai. Given a CSV of target companies, it calls Apify, Exa, TheirStack, Azure OpenAI, Apollo, twitterapi.io, and Statuspage, runs each company through a 21-stage pipeline, and writes results to an Attio custom object (`ranked_companies`) so GTM team can prioritise outreach.
+This CLI enriches prospective customers for Bacca.ai. Given a CSV of target companies, it calls Apify, Exa, TheirStack, Azure OpenAI, Apollo, twitterapi.io, and Statuspage, runs each company through a 21-stage pipeline, and writes results to an Attio custom object (`companies`) so GTM team can prioritise outreach.
 
 ---
 
@@ -24,7 +24,7 @@ Place your company list at `./data/input.csv` (see [Input CSV format](#input-csv
 ## Prerequisites
 
 - **Node.js ≥ 18** and npm
-- **Attio workspace** with the `ranked_companies` custom object. Every column written by this tool must exist in Attio with the exact slug listed in `src/apis/attio.ts:FIELD_SLUGS`. If a column is missing, the upsert silently drops that field.
+- **Attio workspace** with the `companies` custom object. Every column written by this tool must exist in Attio with the exact slug listed in `src/apis/attio.ts:FIELD_SLUGS`. If a column is missing, the upsert silently drops that field.
 - **API keys** for all seven providers (listed in `.env.example`):
   - Attio
   - Apify
@@ -112,7 +112,7 @@ Copy `.env.example` to `.env` and fill in all values. `.env` is gitignored and m
 
 | Group | Environment variables |
 |---|---|
-| Attio | `ATTIO_API_KEY`, `ATTIO_OBJECT_SLUG` |
+| Attio | `ATTIO_API_KEY` |
 | Apify | `APIFY_TOKEN` |
 | Exa | `EXA_API_KEY` |
 | TheirStack | `THEIRSTACK_API_KEY`, `THEIRSTACK_QPS`, `THEIRSTACK_RETRY_TRIES`, `THEIRSTACK_RETRY_BASE_MS` |
@@ -121,7 +121,7 @@ Copy `.env.example` to `.env` and fill in all values. `.env` is gitignored and m
 | Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_DEPLOYMENT_PRO` |
 | Global | `CONCURRENCY` |
 
-`ATTIO_OBJECT_SLUG` defaults to `ranked_companies`. All rate limit tunables are documented in [`docs/rate-limits.md`](docs/rate-limits.md).
+The Attio object slug (`companies`) is hardcoded in `src/apis/attio.ts` — its field slugs in `FIELD_SLUGS` are tightly coupled to that specific object, so it isn't env-configurable. All rate limit tunables are documented in [`docs/rate-limits.md`](docs/rate-limits.md).
 
 ---
 
@@ -153,7 +153,7 @@ The row has no Website and no LinkedIn URL. Add one to the CSV or remove the row
 
 **Column header names must be exact.** If the preflight reports every company as skippable, the most likely cause is a misspelled header — a wrong header makes the entire column invisible. Double-check that your CSV headers match the literals in `src/types.ts:InputRow` exactly: `Website` and `Company Linkedin Url` (capital L, capital U — not `LinkedIn` or `URL`).
 
-**Field slugs in Attio must match exactly.** The script identifies each Attio column by a machine-readable slug (defined in `src/apis/attio.ts:FIELD_SLUGS`). If the slug doesn't match a field on the `ranked_companies` object in your Attio workspace, Attio silently ignores it — no error, the write just disappears. 
+**Field slugs in Attio must match exactly.** The script identifies each Attio column by a machine-readable slug (defined in `src/apis/attio.ts:FIELD_SLUGS`). If the slug doesn't match a field on the `companies` object in your Attio workspace, Attio silently ignores it — no error, the write just disappears. 
 
 **Exa, TheirStack, or Apollo 429 (rate limit).**
 Lower the relevant `*_QPS` value in `.env`. See [`docs/rate-limits.md`](docs/rate-limits.md) for safe defaults.
