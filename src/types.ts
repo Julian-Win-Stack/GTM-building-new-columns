@@ -56,7 +56,7 @@ export type EnrichmentResult = {
   'AI SRE maturity': string;
   'Industry': string;
   'Company Context Score': string;
-  'Change Detection Column for Developer': string;
+  'Company Context Score Change Detection for Developer': string;
   'Tooling Match Score': string;
   'Tooling Match Change Detection for Developer': string;
   'Intent Signal Score': string;

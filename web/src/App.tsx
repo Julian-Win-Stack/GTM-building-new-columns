@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ControlDeck } from './components/ControlDeck.js';
+import { ControlDeck, type SubmitArgs } from './components/ControlDeck.js';
 import { RunStatus } from './components/RunStatus.js';
 import { SkippedPanel } from './components/SkippedPanel.js';
 import { ActivityFeed } from './components/ActivityFeed.js';
@@ -38,14 +38,30 @@ export function App() {
     }
   }, [state.status, state.stagesCompleted, runId]);
 
-  async function startRun(args: { file: File; accountPurpose: string; writeToAttio: boolean }) {
+  async function startRun(args: SubmitArgs) {
     // Starting a new run dismisses any leftover cancelled banner.
     setCancelledSnapshot(null);
-    const fd = new FormData();
-    fd.append('csv', args.file);
-    if (args.accountPurpose) fd.append('accountPurpose', args.accountPurpose);
-    fd.append('writeToAttio', String(args.writeToAttio));
-    const res = await fetch('/api/runs', { method: 'POST', body: fd });
+    let res: Response;
+    if (args.mode === 'csv') {
+      const fd = new FormData();
+      fd.append('csv', args.file);
+      if (args.accountPurpose) fd.append('accountPurpose', args.accountPurpose);
+      fd.append('writeToAttio', String(args.writeToAttio));
+      res = await fetch('/api/runs', { method: 'POST', body: fd });
+    } else {
+      res = await fetch('/api/runs/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: args.manual.companyName,
+          website: args.manual.website,
+          linkedinUrl: args.manual.linkedinUrl,
+          description: args.manual.description,
+          accountPurpose: args.accountPurpose,
+          writeToAttio: args.writeToAttio,
+        }),
+      });
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       alert(body.error ?? `Server returned ${res.status}`);

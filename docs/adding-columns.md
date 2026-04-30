@@ -12,6 +12,8 @@ For a **gating-stage** column, also add reason builders to `src/rejectionReasons
 
 **Note on hash invalidation:** adding any new upstream enrichable column automatically invalidates all Stage 18 hashes → full re-score on the next run. This is intentional (new signal → refreshed score).
 
+**Web UI mirror:** if the new column should appear in the activity feed or the downloadable CSV, also add it to `server/columns.ts:CSV_COLUMN_ORDER` and `web/src/lib/columns.ts:CSV_COLUMN_ORDER` + `COLUMN_WIDTHS`. The two arrays must match verbatim — when one changes, update the other in the same commit.
+
 ## Adding a non-enrichable identity column (CSV-sourced, like Description)
 
 Changes required in 2 places:

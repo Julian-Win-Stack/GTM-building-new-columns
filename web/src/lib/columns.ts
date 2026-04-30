@@ -31,7 +31,7 @@ export const CSV_COLUMN_ORDER: readonly string[] = [
   'LinkedIn Page',
   'Apollo ID',
   'Account Purpose',
-  'Change Detection Column for Developer',
+  'Company Context Score Change Detection for Developer',
   'Tooling Match Change Detection for Developer',
   'Intent Signal Change Detection for Developer',
   'Final Score Change Detection for Developer',
@@ -62,7 +62,7 @@ export const STAGE_COLUMNS = new Set<string>([
 ]);
 
 export const DEVELOPER_COLUMNS = new Set<string>([
-  'Change Detection Column for Developer',
+  'Company Context Score Change Detection for Developer',
   'Tooling Match Change Detection for Developer',
   'Intent Signal Change Detection for Developer',
   'Final Score Change Detection for Developer',
@@ -108,7 +108,7 @@ export const COLUMN_WIDTHS: Record<string, number> = {
   'LinkedIn Page': 220,
   'Apollo ID': 160,
   'Account Purpose': 180,
-  'Change Detection Column for Developer': 200,
+  'Company Context Score Change Detection for Developer': 200,
   'Tooling Match Change Detection for Developer': 200,
   'Intent Signal Change Detection for Developer': 200,
   'Final Score Change Detection for Developer': 200,

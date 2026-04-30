@@ -35,7 +35,7 @@ export const CSV_COLUMN_ORDER: readonly string[] = [
   'LinkedIn Page',
   'Apollo ID',
   'Account Purpose',
-  'Change Detection Column for Developer',
+  'Company Context Score Change Detection for Developer',
   'Tooling Match Change Detection for Developer',
   'Intent Signal Change Detection for Developer',
   'Final Score Change Detection for Developer',
@@ -84,7 +84,7 @@ export const IDENTITY_COLUMNS: ReadonlyArray<string> = [
 ];
 
 export const DEVELOPER_COLUMNS: ReadonlyArray<string> = [
-  'Change Detection Column for Developer',
+  'Company Context Score Change Detection for Developer',
   'Tooling Match Change Detection for Developer',
   'Intent Signal Change Detection for Developer',
   'Final Score Change Detection for Developer',

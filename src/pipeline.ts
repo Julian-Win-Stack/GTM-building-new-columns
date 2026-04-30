@@ -49,7 +49,7 @@ export async function runPipeline(
     'AI SRE maturity': values['AI SRE maturity'] ?? '',
     'Industry': values['Industry'] ?? '',
     'Company Context Score': values['Company Context Score'] ?? '',
-    'Change Detection Column for Developer': '',
+    'Company Context Score Change Detection for Developer': '',
     'Tooling Match Score': values['Tooling Match Score'] ?? '',
     'Tooling Match Change Detection for Developer': '',
     'Intent Signal Score': values['Intent Signal Score'] ?? '',

@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { stringify as csvStringify } from 'csv-stringify/sync';
 import { enrichAll } from '../src/commands/enrichAll.js';
 import { readInputCsv } from '../src/csv.js';
 import { deriveDomain } from '../src/util.js';
@@ -176,6 +177,51 @@ app.post('/api/runs', upload.single('csv'), async (req: Request, res: Response):
 // Pending uploads keyed by runId, used between POST /api/runs (when resumable) and the
 // follow-up /resume or /start call. Cleared as soon as the run actually starts.
 const pendingUploads = new Map<string, { csvPath: string; accountPurpose?: string; writeToAttio: boolean }>();
+
+// Manual single-company run. Materializes a one-row CSV from JSON, then routes through the
+// same enrichAll pipeline. No resume detection — manual runs are short-lived and one-shot.
+app.post('/api/runs/manual', async (req: Request, res: Response): Promise<void> => {
+  const body = req.body ?? {};
+  const companyName = String(body.companyName ?? '').trim();
+  const website = String(body.website ?? '').trim();
+  const linkedinUrl = String(body.linkedinUrl ?? '').trim();
+  const description = String(body.description ?? '').trim();
+  const accountPurposeRaw = String(body.accountPurpose ?? '').trim();
+  const accountPurpose = accountPurposeRaw || undefined;
+  const writeToAttio = body.writeToAttio === true || body.writeToAttio === 'true';
+
+  if (!companyName || !website || !linkedinUrl) {
+    res.status(400).json({ error: 'Company Name, Website, and LinkedIn URL are required.' });
+    return;
+  }
+  if (!deriveDomain(website)) {
+    res.status(400).json({ error: 'Website does not look like a valid URL or domain.' });
+    return;
+  }
+
+  const csvPath = path.join(UPLOAD_DIR, `manual-${randomUUID()}.csv`);
+  const csvText = csvStringify(
+    [
+      {
+        'Company Name': companyName,
+        'Website': website,
+        'Company Linkedin Url': linkedinUrl,
+        'Short Description': description,
+        'Apollo Account Id': '',
+      },
+    ],
+    {
+      header: true,
+      columns: ['Company Name', 'Website', 'Company Linkedin Url', 'Short Description', 'Apollo Account Id'],
+    }
+  );
+  await fs.writeFile(csvPath, csvText, 'utf8');
+
+  const runId = randomUUID();
+  createRun(runId, { writeToAttio, accountPurpose });
+  res.json({ runId });
+  startRunAsync({ runId, csvPath, accountPurpose, writeToAttio });
+});
 
 app.post('/api/runs/:id/start', async (req: Request, res: Response): Promise<void> => {
   const id = req.params.id ?? '';

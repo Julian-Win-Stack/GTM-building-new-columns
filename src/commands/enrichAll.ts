@@ -1066,7 +1066,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   if (bailIfCancelled()) return attioCache;
   // Stage 18 — Company Context Score (OpenAI synthesis, hash-gated re-run)
   const stage18Slug = FIELD_SLUGS['Company Context Score']!;
-  const hashSlug = FIELD_SLUGS['Change Detection Column for Developer']!;
+  const hashSlug = FIELD_SLUGS['Company Context Score Change Detection for Developer']!;
   const enrichableSlugsForHash = (ENRICHABLE_COLUMNS as readonly string[])
     .filter((c) => c !== 'Company Context Score' && c !== 'Tooling Match Score' && c !== 'Intent Signal Score' && c !== 'Final Score')
     .map((c) => FIELD_SLUGS[c]!);
@@ -1108,7 +1108,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
           'Company Name': r.company.companyName,
           'Domain': r.company.domain,
           'Company Context Score': cell,
-          'Change Detection Column for Developer': hash,
+          'Company Context Score Change Detection for Developer': hash,
         });
         setAndEmit(
           ctx,
@@ -1117,7 +1117,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
           { [stage18Slug]: cell, [hashSlug]: hash },
           [
             { slug: stage18Slug, column: 'Company Context Score' },
-            { slug: hashSlug, column: 'Change Detection Column for Developer' },
+            { slug: hashSlug, column: 'Company Context Score Change Detection for Developer' },
           ]
         );
       }
