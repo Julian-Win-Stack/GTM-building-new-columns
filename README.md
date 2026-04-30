@@ -5,7 +5,7 @@ Bacca.ai's GTM enrichment pipeline. Two surfaces share the same pipeline:
 - **CLI (`./enrich`)** — for the operator running batch jobs from a CSV. Always writes results to Attio.
 - **Web UI (`npm run ui`, deployed to Railway)** — for GTM team. Upload a CSV, watch rows fill in stage by stage, download the result. Attio sync is optional via an in-app toggle.
 
-Both call Apify, Exa, TheirStack, Azure OpenAI, Apollo, twitterapi.io, and Statuspage; both run the same 21-stage scoring pipeline; both can write results to an Attio custom object (default: `ranked_companies`).
+Both call Apify, Exa, TheirStack, Azure OpenAI, Apollo, twitterapi.io, and Statuspage; both run the same 21-stage scoring pipeline; both write results to the Attio custom object `companies`.
 
 ---
 
@@ -40,7 +40,7 @@ Then open [http://localhost:5173](http://localhost:5173), drop a CSV onto the up
 ## Prerequisites
 
 - **Node.js ≥ 18** and npm (same for CLI and web UI — no extra tooling for the UI).
-- **Attio workspace** with the target custom object. Every column written by this tool must exist in Attio with the exact slug listed in `src/apis/attio.ts:FIELD_SLUGS`. If a column is missing, the upsert silently drops that field.
+- **Attio workspace** with the `companies` custom object. Every column written by this tool must exist in Attio with the exact slug listed in `src/apis/attio.ts:FIELD_SLUGS`. If a column is missing, the upsert silently drops that field.
 - **API keys** for all seven providers (listed in `.env.example`):
   - Attio
   - Apify
@@ -152,7 +152,7 @@ Copy `.env.example` to `.env` and fill in all values. `.env` is gitignored and m
 
 | Group | Environment variables |
 |---|---|
-| Attio | `ATTIO_API_KEY`, `ATTIO_OBJECT_SLUG` |
+| Attio | `ATTIO_API_KEY` |
 | Apify | `APIFY_TOKEN`, `APIFY_CONCURRENCY`, `APIFY_RETRY_TRIES`, `APIFY_RETRY_BASE_MS` |
 | Exa | `EXA_API_KEY`, `EXA_QPS`, `EXA_RETRY_TRIES`, `EXA_RETRY_BASE_MS` |
 | TheirStack | `THEIRSTACK_API_KEY`, `THEIRSTACK_QPS`, `THEIRSTACK_RETRY_TRIES`, `THEIRSTACK_RETRY_BASE_MS` |
@@ -163,7 +163,7 @@ Copy `.env.example` to `.env` and fill in all values. `.env` is gitignored and m
 | Pipeline | `CONCURRENCY`, `ATTIO_WRITE_CONCURRENCY` |
 | Server (web UI only) | `PORT`, `NODE_ENV`, `UPLOAD_DIR`, `SNAPSHOT_DIR` |
 
-`ATTIO_OBJECT_SLUG` defaults to `ranked_companies`. **Repointing at a different Attio object is a two-edit change**: update `ATTIO_OBJECT_SLUG` here and the slug values in `src/apis/attio.ts:FIELD_SLUGS`. Every other place in the code routes through `FIELD_SLUGS`, so no further edits are needed. All rate-limit tunables are documented in [`docs/rate-limits.md`](docs/rate-limits.md).
+The Attio object slug (`companies`) is hardcoded as `ATTIO_OBJECT_SLUG` in `src/apis/attio.ts` — its field slugs in `FIELD_SLUGS` are tightly coupled to that specific object's schema, so it isn't env-configurable. All rate-limit tunables are documented in [`docs/rate-limits.md`](docs/rate-limits.md).
 
 ---
 
@@ -191,7 +191,7 @@ The web UI deploys to Railway as a single container. Express on `process.env.POR
 | Build command | `npm ci && npm run build` (Vite build only — no server compile, runtime uses `tsx`) |
 | Start command | `npm start` |
 | Health check | `/api/health` |
-| Required env vars | All API keys + `ATTIO_OBJECT_SLUG`, plus `SNAPSHOT_DIR=/data/runs` and `UPLOAD_DIR=/data/uploads` if a persistent volume is mounted |
+| Required env vars | All API keys, plus `SNAPSHOT_DIR=/data/runs` and `UPLOAD_DIR=/data/uploads` if a persistent volume is mounted |
 
 **Persistent volume.** For crash-proof CSV-only runs, mount a 1 GB volume at `/data` and set `SNAPSHOT_DIR=/data/runs` and `UPLOAD_DIR=/data/uploads`. Without the volume the pipeline still works but snapshots and uploads are wiped on every redeploy (no cross-redeploy resume). The `cache/` directory is ephemeral perf cache only — losing it never affects correctness.
 
@@ -207,21 +207,21 @@ The web UI deploys to Railway as a single container. Express on `process.env.POR
 | Change how a column is formatted in Attio | [`docs/formats.md`](docs/formats.md) |
 | Tune QPS limits, retry behaviour, concurrency | [`docs/rate-limits.md`](docs/rate-limits.md) |
 | Write tests for a new stage | [`docs/testing.md`](docs/testing.md) |
-| Repoint at a different Attio object | Edit `ATTIO_OBJECT_SLUG` + `src/apis/attio.ts:FIELD_SLUGS` |
+| Repoint at a different Attio object | Edit `ATTIO_OBJECT_SLUG` + `FIELD_SLUGS` in `src/apis/attio.ts` |
 
 ---
 
 ## Troubleshooting
 
 **Preflight reports N rows will be skipped.**
-The row has no `Website` value. Add one to the CSV or remove the row.
+The row is missing `Website` or `Company Linkedin Url` (or both — both are required). Add the missing value to the CSV or remove the row.
 
 **Column header names must be exact.** If the preflight reports every company as skippable, the most likely cause is a misspelled header — a wrong header makes the entire column invisible. Double-check that your CSV headers match the literals in `src/types.ts:InputRow` exactly: `Website` and `Company Linkedin Url` (capital L, capital U — not `LinkedIn` or `URL`).
 
-**Field slugs in Attio must match exactly.** The script identifies each Attio column by a machine-readable slug (defined in `src/apis/attio.ts:FIELD_SLUGS`). If the slug doesn't match a field on the target object in your Attio workspace, Attio silently ignores it — no error, the write just disappears.
+**Field slugs in Attio must match exactly.** The script identifies each Attio column by a machine-readable slug (defined in `src/apis/attio.ts:FIELD_SLUGS`). If the slug doesn't match a field on the `companies` object in your Attio workspace, Attio silently ignores it — no error, the write just disappears.
 
-**Web UI: `ranked_companies` columns are empty after the run.**
-Likely "Push to Attio" is on but the new Attio object is missing some columns from `FIELD_SLUGS` — those writes silently drop. Cross-check every entry in `FIELD_SLUGS` against the attributes on the target object.
+**Web UI: `companies` columns are empty after the run.**
+Likely "Push to Attio" is on but the Attio object is missing some columns from `FIELD_SLUGS` — those writes silently drop. Cross-check every entry in `FIELD_SLUGS` against the attributes on the target object.
 
 **Web UI: resume banner appears for an unrelated CSV.**
 A previous snapshot has the same domain set as the new upload. Click "Start fresh" to discard the old snapshot and start clean.

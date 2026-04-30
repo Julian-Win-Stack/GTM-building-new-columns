@@ -2,6 +2,8 @@ import axios from 'axios';
 import { KEYS } from '../config.js';
 import type { AttioRecord, EnrichmentResult } from '../types.js';
 
+export const ATTIO_OBJECT_SLUG = 'companies';
+
 export const FIELD_SLUGS: Record<string, string> = {
   'Company Name': 'company',
   'Domain': 'domains',
@@ -35,7 +37,7 @@ export const FIELD_SLUGS: Record<string, string> = {
   'Intent Signal Change Detection for Developer': 'intent_signal_change_detection_for_developer',
   'Final Score': 'final_score',
   'Final Score Change Detection for Developer': 'final_score_change_detection_for_developer',
-  'Reason for Rejection': 'reason_for_rejection', 
+  'Reason for Rejection': 'reason_for_rejection',
 };
 
 const http = axios.create({
@@ -85,7 +87,7 @@ export async function fetchAllRecords(
   const limit = 500;
 
   while (true) {
-    const res = await client.post(`/objects/${KEYS.attioObjectSlug}/records/query`, { limit, offset });
+    const res = await client.post(`/objects/${ATTIO_OBJECT_SLUG}/records/query`, { limit, offset });
     const records = (res.data?.data ?? []) as RawAttioRecord[];
     if (records.length === 0) break;
 
@@ -104,7 +106,7 @@ export async function fetchAllRecords(
 }
 
 export async function findCompanyByDomain(domain: string): Promise<AttioRecord | null> {
-  const res = await http.post(`/objects/${KEYS.attioObjectSlug}/records/query`, {
+  const res = await http.post(`/objects/${ATTIO_OBJECT_SLUG}/records/query`, {
     filter: { [DOMAIN_SLUG]: { $eq: domain } },
     limit: 1,
   });
@@ -114,20 +116,20 @@ export async function findCompanyByDomain(domain: string): Promise<AttioRecord |
 
 export async function createCompany(data: Partial<EnrichmentResult>): Promise<AttioRecord> {
   const values = toAttioValues(data);
-  const res = await http.post(`/objects/${KEYS.attioObjectSlug}/records`, { data: { values } });
+  const res = await http.post(`/objects/${ATTIO_OBJECT_SLUG}/records`, { data: { values } });
   const rec = res.data?.data;
   return { id: rec.id?.record_id ?? rec.id, values: rec.values ?? {} };
 }
 
 export async function updateCompany(recordId: string, data: Partial<EnrichmentResult>): Promise<void> {
   const values = toAttioValues(data);
-  await http.patch(`/objects/${KEYS.attioObjectSlug}/records/${recordId}`, { data: { values } });
+  await http.patch(`/objects/${ATTIO_OBJECT_SLUG}/records/${recordId}`, { data: { values } });
 }
 
 export async function upsertCompanyByDomain(data: Partial<EnrichmentResult>): Promise<AttioRecord> {
   const values = toAttioValues(data);
   const res = await http.put(
-    `/objects/${KEYS.attioObjectSlug}/records`,
+    `/objects/${ATTIO_OBJECT_SLUG}/records`,
     { data: { values } },
     { params: { matching_attribute: DOMAIN_SLUG } }
   );

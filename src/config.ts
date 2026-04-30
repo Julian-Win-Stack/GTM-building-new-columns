@@ -29,7 +29,6 @@ export const KEYS = {
   azureOpenAIDeployment: process.env.AZURE_OPENAI_DEPLOYMENT ?? '',
   azureOpenAIDeploymentPro: process.env.AZURE_OPENAI_DEPLOYMENT_PRO ?? '',
   attio: process.env.ATTIO_API_KEY ?? '',
-  attioObjectSlug: process.env.ATTIO_OBJECT_SLUG ?? 'ranked_companies',
   apollo: process.env.APOLLO_API_KEY ?? '',
 } as const;
 

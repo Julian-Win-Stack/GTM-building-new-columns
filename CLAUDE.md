@@ -1,6 +1,6 @@
 # Project
 **Bacca.ai** is an AI SRE startup that sells software to high-scale digital-native platforms. This repo enriches potential customers (from a CSV) via Apify, Exa, TheirStack, twitterapi.io, Statuspage, Apollo, and Azure OpenAI, scoring each company against Bacca's ICP. Two surfaces share the same pipeline:
-- **CLI (`./enrich`)** — the original automation entry point. Always writes results to the Attio custom object (`ranked_companies`).
+- **CLI (`./enrich`)** — the original automation entry point. Always writes results to the Attio custom object (`companies`).
 - **Web UI (`npm run ui`, deployed to Railway)** — a one-page React app for CEO / GTM leads / GTM interns. Upload a CSV *or* enter a single company by hand (no Apollo Account ID on the manual path), optionally toggle Attio sync, watch rows fill in stage by stage, download a CSV.
 
 ## Stack
@@ -146,7 +146,7 @@ Flow: load CSV → pre-fetch ALL Attio records → merge processing set (CSV ∪
 - **Stages 18/19/20** all operate on `survivorsAfterStage6` filtered to companies where all 17 prior enrichable columns are non-empty. Independent of each other.
 - **Stage 21** additionally requires all 3 upstream score columns non-empty; runs after 18/19/20.
 - **Identity-write** runs before Stage 1: fills empty Attio columns from CSV (never overwrites). Match by Domain only.
-- **Preflight** runs before identity-write: scans the CSV (after `--limit` is applied), reports rows that will be skipped (no Website — LinkedIn-only rows are skipped too), then waits 3 seconds for Ctrl-C before any Attio writes happen. Tests bypass via the internal `skipConfirm` option.
+- **Preflight** runs before identity-write: scans the CSV (after `--limit` is applied), reports rows that will be skipped — a row needs **both** `Website` and `Company Linkedin Url` to be processed; rows missing either (or both) are dropped with a reason ("Missing Website (no domain available)", "Missing LinkedIn URL", or "Missing Website and LinkedIn URL"). Skip reasons are emitted on the `run-started` event so the web UI can show them in the SkippedPanel. Then waits 3 seconds for Ctrl-C before any Attio writes happen. Tests bypass via the internal `skipConfirm` option.
 
 See `docs/formats.md` for per-column Attio value formats, hash-gating details, and API mapping.
 
@@ -227,7 +227,7 @@ See `docs/testing.md` for full rules, scope boundaries, and the commit workflow.
 ## Rules
 - Never commit `.env` — only `.env.example`
 - All secrets in `.env`, read via `KEYS` in `config.ts`
-- `ATTIO_OBJECT_SLUG` defaults to `ranked_companies`; overridable via `.env`
+- The Attio object slug (`companies`) is hardcoded as `ATTIO_OBJECT_SLUG` in `src/apis/attio.ts` — not env-driven, since the slug names in `FIELD_SLUGS` are tightly coupled to that specific object's schema
 - Adding a new enrichable column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `attio.ts:FIELD_SLUGS` — see `docs/adding-columns.md` for full checklist including score columns and circular dependency exclusions
 - Never make business logic decisions without asking the user first
 - `toAttioValues` skips empty strings — enrichers must return `''` not `null`/`undefined`
