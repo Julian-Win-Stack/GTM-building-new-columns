@@ -4,6 +4,15 @@ import * as path from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeCsv, makeExaResponse, makeExaTextResponse } from './enrichAll.e2e.helpers.js';
 import { computeInputHash } from '../stages/companyContextScore.js';
+import { FIELD_SLUGS } from '../apis/attio.js';
+
+// Slug shortcuts for Attio cache fixtures. Sourced from FIELD_SLUGS so swapping objects
+// only requires editing src/apis/attio.ts; these tests follow automatically.
+const S = (display: string): string => {
+  const slug = FIELD_SLUGS[display];
+  if (!slug) throw new Error(`e2e fixture: no FIELD_SLUGS entry for "${display}"`);
+  return slug;
+};
 
 // ---------------------------------------------------------------------------
 // 1. Pre-import env setup — must run before any module is loaded
@@ -45,7 +54,6 @@ const m = vi.hoisted(() => {
     // Attio
     fetchAllRecords: vi.fn(),
     upsertByDomain: vi.fn(),
-    upsertByLinkedIn: vi.fn(),
     // Exa
     digitalNativeExaSearch: vi.fn(),
     numberOfUsersExaSearch: vi.fn(),
@@ -81,7 +89,6 @@ vi.mock('../apis/attio.js', async () => {
     ...actual,
     fetchAllRecords: m.fetchAllRecords,
     upsertCompanyByDomain: m.upsertByDomain,
-    upsertCompanyByLinkedInUrl: m.upsertByLinkedIn,
   };
 });
 
@@ -225,7 +232,6 @@ beforeEach(async () => {
   // Attio defaults
   m.fetchAllRecords.mockResolvedValue(new Map());
   m.upsertByDomain.mockResolvedValue({ id: 'rec', values: {} });
-  m.upsertByLinkedIn.mockResolvedValue({ id: 'rec', values: {} });
 
   // TheirStack defaults: Slack found, Teams not found
   m.theirstackJobsByTechnology.mockImplementation(
@@ -309,9 +315,9 @@ describe('input routing', () => {
         [
           'acme.com',
           {
-            linkedin_page: 'https://linkedin.com/company/acme',
-            company_name: 'Acme',
-            domain: 'acme.com',
+            [S('LinkedIn Page')]: 'https://linkedin.com/company/acme',
+            [S('Company Name')]: 'Acme',
+            [S('Domain')]: 'acme.com',
           },
         ],
       ])
@@ -340,7 +346,6 @@ describe('input routing', () => {
     await enrichAll({ csv: csvPath, skipConfirm: true });
 
     expect(m.upsertByDomain).not.toHaveBeenCalled();
-    expect(m.upsertByLinkedIn).not.toHaveBeenCalled();
     expect(m.digitalNativeExaSearch).not.toHaveBeenCalled();
   });
 
@@ -361,28 +366,14 @@ describe('input routing', () => {
         [
           'acme.com',
           {
-            company_name: 'Acme Corp (existing)',
-            domain: 'acme.com',
-            linkedin_page: '',
-            description: '',
-            // Stage columns pre-populated so all stages are skipped
-            competitor_tooling: 'Not using any competitor tools',
-            digital_native: 'Digital-native B2B\n\nConfidence: High\n\nReasoning: test',
-            number_of_users: 'User count: 5M MAU\n\nUser count bucket: 100K+\n\nConfidence: medium',
-            observability_tool: 'Datadog: https://example.com',
-            communication_tool: 'Slack: https://example.com',
-            cloud_tool: 'AWS: https://example.com',
-            funding_growth: 'Growth: Series B',
-            revenue_growth: 'Growth: ~$15M ARR\n\nConfidence: medium',
-            number_of_engineers: '10',
-            number_of_sres: '3\n\nhttps://linkedin.com/in/joe',
-            engineer_hiring: '2\n\nSoftware Engineer: https://jobs.example.com/1',
-            sre_hiring: '0',
-            customer_complains_on_x: 'Full outage: 0\nPartial outage: 0\nPerformance degradation: 0\nUnclear: 0',
-            recent_incidents_official: 'No status page found',
-            ai_adoption_mindset: 'Classification: Neutral\nConfidence: Low',
-            ai_sre_maturity: 'Classification: ideating\nConfidence: Low\nSales signal: High potential',
-            industry: 'industry: SaaS (B2B)\nreason: B2B software',
+            ...ALL_17_COLS,
+            [S('Company Name')]: 'Acme Corp (existing)',
+            [S('Domain')]: 'acme.com',
+            [S('LinkedIn Page')]: '',
+            [S('Description')]: '',
+            // Override two stage cells to validate "no overwrite" path
+            [S('Digital Native')]: 'Digital-native B2B\n\nConfidence: High\n\nReasoning: test',
+            [S('Funding Growth')]: 'Growth: Series B',
           },
         ],
       ])
@@ -417,28 +408,14 @@ describe('input routing', () => {
         [
           'acme.com',
           {
-            company_name: 'Acme Corp',
-            domain: 'acme.com',
-            linkedin_page: 'https://linkedin.com/company/acme',
-            description: 'A SaaS company',
-            website: 'acme.com',
-            competitor_tooling: 'Not using any competitor tools',
-            digital_native: 'Digital-native B2B\n\nConfidence: High\n\nReasoning: test',
-            number_of_users: 'User count: 5M MAU\n\nUser count bucket: 100K+\n\nConfidence: medium',
-            observability_tool: 'Datadog: https://example.com',
-            communication_tool: 'Slack: https://example.com',
-            cloud_tool: 'AWS: https://example.com',
-            funding_growth: 'Growth: Series B',
-            revenue_growth: 'Growth: ~$15M ARR\n\nConfidence: medium',
-            number_of_engineers: '10',
-            number_of_sres: '3\n\nhttps://linkedin.com/in/joe',
-            engineer_hiring: '2\n\nSoftware Engineer: https://jobs.example.com/1',
-            sre_hiring: '0',
-            customer_complains_on_x: 'Full outage: 0\nPartial outage: 0\nPerformance degradation: 0\nUnclear: 0',
-            recent_incidents_official: 'No status page found',
-            ai_adoption_mindset: 'Classification: Neutral\nConfidence: Low',
-            ai_sre_maturity: 'Classification: ideating\nConfidence: Low\nSales signal: High potential',
-            industry: 'industry: SaaS (B2B)\nreason: B2B software',
+            ...ALL_17_COLS,
+            [S('Company Name')]: 'Acme Corp',
+            [S('Domain')]: 'acme.com',
+            [S('LinkedIn Page')]: 'https://linkedin.com/company/acme',
+            [S('Description')]: 'A SaaS company',
+            [S('Website')]: 'acme.com',
+            [S('Digital Native')]: 'Digital-native B2B\n\nConfidence: High\n\nReasoning: test',
+            [S('Funding Growth')]: 'Growth: Series B',
           },
         ],
       ])
@@ -476,7 +453,7 @@ describe('input routing', () => {
     // No CSV rows — the only company in the pipeline is an Attio-only carry-over.
     const csvPath = await makeCsv(tmpDir, []);
     m.fetchAllRecords.mockResolvedValue(
-      new Map([['attio-only.com', { company_name: 'Carry Co', domain: 'attio-only.com' }]])
+      new Map([['attio-only.com', { [S('Company Name')]: 'Carry Co', [S('Domain')]: 'attio-only.com' }]])
     );
     defaultExaMocks(['attio-only.com']);
 
@@ -500,7 +477,7 @@ describe('csv-attio merge', () => {
       new Map([
         [
           'attio-only.com',
-          { company_name: 'Attio Only Co', domain: 'attio-only.com' },
+          { [S('Company Name')]: 'Attio Only Co', [S('Domain')]: 'attio-only.com' },
         ],
       ])
     );
@@ -555,7 +532,7 @@ describe('happy path', () => {
       'AI SRE maturity',
       'Industry',
       'Company Context Score',
-      'Change Detection Column for Developer',
+      'Company Context Score Change Detection for Developer',
       'Tooling Match Score',
       'Tooling Match Change Detection for Developer',
       'Intent Signal Score',
@@ -599,27 +576,15 @@ describe('Stage 16 competitor shortcut', () => {
         [
           'acme.com',
           {
-            company_name: 'Acme',
-            domain: 'acme.com',
-            linkedin_page: 'https://linkedin.com/company/acme',
-            description: 'SaaS platform',
-            competitor_tooling: 'Rootly\n\nEvidence: (Rootly\'s customer page)',
-            digital_native: 'Digital-native B2B\n\nConfidence: High\n\nReasoning: test',
-            number_of_users: 'User count: 5M MAU\n\nUser count bucket: 100K+\n\nConfidence: medium',
-            observability_tool: 'Datadog: https://example.com',
-            communication_tool: 'Slack: https://example.com',
-            cloud_tool: 'AWS: https://example.com',
-            funding_growth: 'Growth: Series B',
-            revenue_growth: 'Growth: ~$15M ARR\n\nConfidence: medium',
-            number_of_engineers: '10',
-            number_of_sres: '3\n\nhttps://linkedin.com/in/joe',
-            engineer_hiring: '2\n\nSoftware Engineer: https://jobs.example.com/1',
-            sre_hiring: '0',
-            customer_complains_on_x: 'Full outage: 0\nPartial outage: 0\nPerformance degradation: 0\nUnclear: 0',
-            recent_incidents_official: 'No status page found',
-            ai_adoption_mindset: 'Classification: Neutral\nConfidence: Low',
-            ai_sre_maturity: '',
-            industry: 'industry: SaaS (B2B)\nreason: B2B software',
+            ...ALL_17_COLS,
+            [S('Company Name')]: 'Acme',
+            [S('Domain')]: 'acme.com',
+            [S('LinkedIn Page')]: 'https://linkedin.com/company/acme',
+            [S('Description')]: 'SaaS platform',
+            [S('Competitor Tooling')]: 'Rootly\n\nEvidence: (Rootly\'s customer page)',
+            [S('Digital Native')]: 'Digital-native B2B\n\nConfidence: High\n\nReasoning: test',
+            [S('Funding Growth')]: 'Growth: Series B',
+            [S('AI SRE maturity')]: '',
           },
         ],
       ])
@@ -695,7 +660,7 @@ describe('cache-gate', () => {
         [
           'stale.com',
           {
-            digital_native:
+            [S('Digital Native')]:
               'NOT Digital-native or digitally critical\n\nConfidence: High\n\nReasoning: traditional firm\n\nSources:\nhttps://example.com',
           },
         ],
@@ -918,30 +883,30 @@ describe('Stage 11+12 union-skip', () => {
 // ---------------------------------------------------------------------------
 
 const ENRICHABLE_SLUGS_FOR_HASH = [
-  'digital_native', 'cloud_tool', 'observability_tool', 'communication_tool',
-  'number_of_users', 'competitor_tooling', 'number_of_engineers', 'number_of_sres',
-  'engineer_hiring', 'sre_hiring', 'customer_complains_on_x', 'recent_incidents_official',
-  'funding_growth', 'revenue_growth', 'ai_adoption_mindset', 'ai_sre_maturity', 'industry',
+  S('Digital Native'), S('Cloud Tool'), S('Observability Tool'), S('Communication Tool'),
+  S('Number of Users'), S('Competitor Tooling'), S('Number of Engineers'), S('Number of SREs'),
+  S('Engineer Hiring'), S('SRE Hiring'), S('Customer complains on X'), S('Recent incidents ( Official )'),
+  S('Funding Growth'), S('Revenue Growth'), S('AI adoption mindset'), S('AI SRE maturity'), S('Industry'),
 ];
 
 const ALL_17_COLS: Record<string, string> = {
-  digital_native: 'Digital-native B2C\n\nConfidence: High\n\nReasoning: test',
-  cloud_tool: 'AWS: https://example.com',
-  observability_tool: 'Datadog: https://example.com',
-  communication_tool: 'Slack: https://example.com',
-  number_of_users: 'User count: 5M MAU\n\nUser count bucket: 100K+\n\nConfidence: medium',
-  competitor_tooling: 'Not using any competitor tools',
-  number_of_engineers: '10',
-  number_of_sres: '3\n\nhttps://linkedin.com/in/joe',
-  engineer_hiring: '2\n\nSoftware Engineer: https://jobs.example.com/1',
-  sre_hiring: '0',
-  customer_complains_on_x: 'Full outage: 0\nPartial outage: 0\nPerformance degradation: 0\nUnclear: 0',
-  recent_incidents_official: 'No status page found',
-  funding_growth: 'Growth: Series B\n\nTimeframe: 2024',
-  revenue_growth: 'Growth: ~$15M ARR\n\nConfidence: medium',
-  ai_adoption_mindset: 'Classification: Neutral\nConfidence: Low',
-  ai_sre_maturity: 'Classification: ideating\nConfidence: Low\nSales signal: High potential',
-  industry: 'industry: SaaS (B2B)\nreason: B2B software',
+  [S('Digital Native')]: 'Digital-native B2C\n\nConfidence: High\n\nReasoning: test',
+  [S('Cloud Tool')]: 'AWS: https://example.com',
+  [S('Observability Tool')]: 'Datadog: https://example.com',
+  [S('Communication Tool')]: 'Slack: https://example.com',
+  [S('Number of Users')]: 'User count: 5M MAU\n\nUser count bucket: 100K+\n\nConfidence: medium',
+  [S('Competitor Tooling')]: 'Not using any competitor tools',
+  [S('Number of Engineers')]: '10',
+  [S('Number of SREs')]: '3\n\nhttps://linkedin.com/in/joe',
+  [S('Engineer Hiring')]: '2\n\nSoftware Engineer: https://jobs.example.com/1',
+  [S('SRE Hiring')]: '0',
+  [S('Customer complains on X')]: 'Full outage: 0\nPartial outage: 0\nPerformance degradation: 0\nUnclear: 0',
+  [S('Recent incidents ( Official )')]: 'No status page found',
+  [S('Funding Growth')]: 'Growth: Series B\n\nTimeframe: 2024',
+  [S('Revenue Growth')]: 'Growth: ~$15M ARR\n\nConfidence: medium',
+  [S('AI adoption mindset')]: 'Classification: Neutral\nConfidence: Low',
+  [S('AI SRE maturity')]: 'Classification: ideating\nConfidence: Low\nSales signal: High potential',
+  [S('Industry')]: 'industry: SaaS (B2B)\nreason: B2B software',
 };
 
 describe('Stage 18 hash-gate', () => {
@@ -955,8 +920,8 @@ describe('Stage 18 hash-gate', () => {
           'hash.com',
           {
             ...ALL_17_COLS,
-            company_context_score: '3\n\nReasoning: old.',
-            change_detection_column_for_developer: 'stale-hash',
+            [S('Company Context Score')]: '3\n\nReasoning: old.',
+            [S('Company Context Score Change Detection for Developer')]: 'stale-hash',
           },
         ],
       ])
@@ -984,8 +949,8 @@ describe('Stage 18 hash-gate', () => {
           'hash.com',
           {
             ...ALL_17_COLS,
-            company_context_score: '4.5\n\nReasoning: existing.',
-            change_detection_column_for_developer: correctHash,
+            [S('Company Context Score')]: '4.5\n\nReasoning: existing.',
+            [S('Company Context Score Change Detection for Developer')]: correctHash,
           },
         ],
       ])

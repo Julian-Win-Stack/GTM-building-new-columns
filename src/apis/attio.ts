@@ -3,39 +3,39 @@ import { KEYS } from '../config.js';
 import type { AttioRecord, EnrichmentResult } from '../types.js';
 
 export const FIELD_SLUGS: Record<string, string> = {
-  'Company Name': 'company_name',
-  'Domain': 'domain',
-  'LinkedIn Page': 'linkedin_page',
+  'Company Name': 'company',
+  'Domain': 'domains',
+  'LinkedIn Page': 'linkedin',
   'Description': 'description',
   'Website': 'website',
   'Account Purpose': 'account_purpose',
   'Apollo ID': 'apollo_id',
   'Digital Native': 'digital_native',
-  'Cloud Tool': 'cloud_tool',
+  'Cloud Tool': 'cloud',
   'Observability Tool': 'observability_tool',
   'Communication Tool': 'communication_tool',
-  'Number of Users': 'number_of_users',
+  'Number of Users': 'number_of_users_customers',
   'Competitor Tooling': 'competitor_tooling',
   'Number of Engineers': 'number_of_engineers',
   'Number of SREs': 'number_of_sres',
   'Engineer Hiring': 'engineer_hiring',
   'SRE Hiring': 'sre_hiring',
-  'Customer complains on X': 'customer_complains_on_x',
+  'Customer complains on X': 'customer_complaints_on_x',
   'Recent incidents ( Official )': 'recent_incidents_official',
   'Funding Growth': 'funding_growth',
   'Revenue Growth': 'revenue_growth',
   'AI adoption mindset': 'ai_adoption_mindset',
   'AI SRE maturity': 'ai_sre_maturity',
-  'Industry': 'industry',
+  'Industry': 'industry_in_house_tool',
   'Company Context Score': 'company_context_score',
-  'Change Detection Column for Developer': 'change_detection_column_for_developer',
+  'Company Context Score Change Detection for Developer': 'company_context_change_detection_column_for_developer',
   'Tooling Match Score': 'tooling_match_score',
   'Tooling Match Change Detection for Developer': 'tooling_match_change_detection_for_developer',
   'Intent Signal Score': 'intent_signal_score',
   'Intent Signal Change Detection for Developer': 'intent_signal_change_detection_for_developer',
-  'Final Score': 'account_score',
+  'Final Score': 'final_score',
   'Final Score Change Detection for Developer': 'final_score_change_detection_for_developer',
-  'Reason for Rejection': 'reason_for_rejection',
+  'Reason for Rejection': 'reason_for_rejection', 
 };
 
 const http = axios.create({
@@ -57,8 +57,12 @@ function toAttioValues(data: Partial<EnrichmentResult>): Record<string, unknown>
 type RawAttioField = Array<{ value?: string; domain_name?: string }>;
 type RawAttioRecord = { id: { record_id: string } | string; values: Record<string, RawAttioField> };
 
+// Identity attribute on the Attio object — single source of truth driven by FIELD_SLUGS so
+// swapping objects only requires editing the slug map above, not literal strings throughout.
+const DOMAIN_SLUG = FIELD_SLUGS['Domain']!;
+
 function extractDomain(rec: RawAttioRecord): string {
-  const arr = rec.values?.['domain'];
+  const arr = rec.values?.[DOMAIN_SLUG];
   return arr?.[0]?.domain_name ?? arr?.[0]?.value ?? '';
 }
 
@@ -101,7 +105,7 @@ export async function fetchAllRecords(
 
 export async function findCompanyByDomain(domain: string): Promise<AttioRecord | null> {
   const res = await http.post(`/objects/${KEYS.attioObjectSlug}/records/query`, {
-    filter: { domain: { $eq: domain } },
+    filter: { [DOMAIN_SLUG]: { $eq: domain } },
     limit: 1,
   });
   const rec = res.data?.data?.[0];
@@ -125,18 +129,7 @@ export async function upsertCompanyByDomain(data: Partial<EnrichmentResult>): Pr
   const res = await http.put(
     `/objects/${KEYS.attioObjectSlug}/records`,
     { data: { values } },
-    { params: { matching_attribute: 'domain' } }
-  );
-  const rec = res.data?.data;
-  return { id: rec.id?.record_id ?? rec.id, values: rec.values ?? {} };
-}
-
-export async function upsertCompanyByLinkedInUrl(data: Partial<EnrichmentResult>): Promise<AttioRecord> {
-  const values = toAttioValues(data);
-  const res = await http.put(
-    `/objects/${KEYS.attioObjectSlug}/records`,
-    { data: { values } },
-    { params: { matching_attribute: 'linkedin_page' } }
+    { params: { matching_attribute: DOMAIN_SLUG } }
   );
   const rec = res.data?.data;
   return { id: rec.id?.record_id ?? rec.id, values: rec.values ?? {} };
