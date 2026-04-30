@@ -178,23 +178,101 @@ app.post('/api/runs', upload.single('csv'), async (req: Request, res: Response):
 // follow-up /resume or /start call. Cleared as soon as the run actually starts.
 const pendingUploads = new Map<string, { csvPath: string; accountPurpose?: string; writeToAttio: boolean }>();
 
+// Single-line fields reject every C0 control char and DEL. Multi-line (description) keeps
+// \t \n \r and rejects the rest — null bytes from a malicious client never reach the CSV
+// writer, downstream Attio strings, or our own logs.
+const SINGLE_LINE_CONTROL_RE = /[\x00-\x1F\x7F]/;
+const MULTI_LINE_CONTROL_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+
+type ManualFieldRule = {
+  label: string;
+  required: boolean;
+  maxLength: number;
+  allowNewlines: boolean;
+};
+
+const MANUAL_FIELD_RULES = {
+  companyName: { label: 'Company Name', required: true, maxLength: 600, allowNewlines: false },
+  website: { label: 'Website', required: true, maxLength: 1500, allowNewlines: false },
+  linkedinUrl: { label: 'LinkedIn URL', required: true, maxLength: 1500, allowNewlines: false },
+  description: { label: 'Description', required: false, maxLength: 15000, allowNewlines: true },
+  accountPurpose: { label: 'Account Purpose', required: false, maxLength: 600, allowNewlines: false },
+} as const satisfies Record<string, ManualFieldRule>;
+
+function validateManualField(
+  raw: unknown,
+  rule: ManualFieldRule
+): { ok: true; value: string } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) {
+    if (rule.required) return { ok: false, error: `${rule.label} is required.` };
+    return { ok: true, value: '' };
+  }
+  if (typeof raw !== 'string') {
+    return { ok: false, error: `${rule.label} must be a string.` };
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    if (rule.required) return { ok: false, error: `${rule.label} is required.` };
+    return { ok: true, value: '' };
+  }
+  if (trimmed.length > rule.maxLength) {
+    return { ok: false, error: `${rule.label} must be ${rule.maxLength} characters or fewer.` };
+  }
+  const re = rule.allowNewlines ? MULTI_LINE_CONTROL_RE : SINGLE_LINE_CONTROL_RE;
+  if (re.test(trimmed)) {
+    return {
+      ok: false,
+      error: rule.allowNewlines
+        ? `${rule.label} contains disallowed control characters.`
+        : `${rule.label} contains disallowed control characters or line breaks.`,
+    };
+  }
+  return { ok: true, value: trimmed };
+}
+
 // Manual single-company run. Materializes a one-row CSV from JSON, then routes through the
 // same enrichAll pipeline. No resume detection — manual runs are short-lived and one-shot.
 app.post('/api/runs/manual', async (req: Request, res: Response): Promise<void> => {
-  const body = req.body ?? {};
-  const companyName = String(body.companyName ?? '').trim();
-  const website = String(body.website ?? '').trim();
-  const linkedinUrl = String(body.linkedinUrl ?? '').trim();
-  const description = String(body.description ?? '').trim();
-  const accountPurposeRaw = String(body.accountPurpose ?? '').trim();
-  const accountPurpose = accountPurposeRaw || undefined;
-  const writeToAttio = body.writeToAttio === true || body.writeToAttio === 'true';
+  const body = (req.body ?? {}) as Record<string, unknown>;
 
-  if (!companyName || !website || !linkedinUrl) {
-    res.status(400).json({ error: 'Company Name, Website, and LinkedIn URL are required.' });
+  const companyNameResult = validateManualField(body.companyName, MANUAL_FIELD_RULES.companyName);
+  if (!companyNameResult.ok) {
+    res.status(400).json({ error: companyNameResult.error });
     return;
   }
-  if (!deriveDomain(website)) {
+  const websiteResult = validateManualField(body.website, MANUAL_FIELD_RULES.website);
+  if (!websiteResult.ok) {
+    res.status(400).json({ error: websiteResult.error });
+    return;
+  }
+  const linkedinUrlResult = validateManualField(body.linkedinUrl, MANUAL_FIELD_RULES.linkedinUrl);
+  if (!linkedinUrlResult.ok) {
+    res.status(400).json({ error: linkedinUrlResult.error });
+    return;
+  }
+  const descriptionResult = validateManualField(body.description, MANUAL_FIELD_RULES.description);
+  if (!descriptionResult.ok) {
+    res.status(400).json({ error: descriptionResult.error });
+    return;
+  }
+  const accountPurposeResult = validateManualField(body.accountPurpose, MANUAL_FIELD_RULES.accountPurpose);
+  if (!accountPurposeResult.ok) {
+    res.status(400).json({ error: accountPurposeResult.error });
+    return;
+  }
+
+  const companyName = companyNameResult.value;
+  const website = websiteResult.value;
+  const linkedinUrl = linkedinUrlResult.value;
+  const description = descriptionResult.value;
+  const accountPurpose = accountPurposeResult.value || undefined;
+  const writeToAttio = body.writeToAttio === true || body.writeToAttio === 'true';
+
+  // deriveDomain is intentionally lenient (accepts www., bare hosts, paths, ports) — but a
+  // result with no dot means we got something like "foobar" or "localhost", which is never
+  // a real company website.
+  const derived = deriveDomain(website);
+  if (!derived.includes('.')) {
     res.status(400).json({ error: 'Website does not look like a valid URL or domain.' });
     return;
   }
