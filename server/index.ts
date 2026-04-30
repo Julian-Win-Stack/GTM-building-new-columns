@@ -343,6 +343,11 @@ void sweepOldSnapshots(SNAPSHOT_TTL_MS).then((deleted) => {
   if (deleted > 0) console.log(`[snapshotStore] startup sweep removed ${deleted} stale snapshot(s)`);
 });
 
-app.listen(PORT, () => {
-  console.log(`[server] listening on http://localhost:${PORT}`);
-});
+// Skip the listen when imported as a module (tests mount the app on a random port).
+if (process.env['NODE_ENV'] !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`[server] listening on http://localhost:${PORT}`);
+  });
+}
+
+export { app };

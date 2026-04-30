@@ -140,6 +140,14 @@ Ask: "If you removed the end consumer entirely, would the product still have its
 
 - If YES (e.g., a CRM still helps recruiters manage pipelines without candidates) → classify as B2B.
 - If NO (e.g., a loyalty platform has no purpose without consumers earning and redeeming rewards) → classify as B2B2C.
+Do not treat "the business pays the subscription" as decisive. Payment is Rule 2; daily usage is Rule 3; B2B2C is determined by Rule 5. 
+If the platform's primary output is a consumer-facing experience (students learning, patients enrolling, members earning rewards, shoppers checking out, travelers booking, candidates applying, riders driving, viewers watching), it is B2B2C — even if only the business signs the contract.
+Before classifying as B2B, you must explicitly answer: "Who taps the buttons in the product day-to-day?" 
+If the answer is end consumers, students, patients, members, employees-as-end-users, drivers, or any non-employee-of-the-buyer population, the default is B2B2C. 
+Override only with strong evidence the platform's value persists if you removed those users entirely.
+Employees of the buying company count as a consumer-side population when the platform is consumed by them as individuals (LMS, learning, coaching, benefits, recognition, financial wellness). 
+If employees are the daily users of the experience and the platform's value would collapse without them, classify as B2B2C.
+Indirect consumer impact qualifies for B2B2C. If the platform's downstream output reaches end consumers (an ad delivered, a fraud check on a shopper, a payment processed, an SMS sent, a deep link tapped) and that downstream effect is the platform's purpose, classify as B2B2C — even though only the business team operates the dashboard.
 
 
 Rule 6 — B2C2B
@@ -173,9 +181,10 @@ Examples:
 - Technology consultancies
 - Offshore development shops
 
-If this rule matches, stop and return NOT Digital-native or digitally critical.
-
-TIEBREAKER:
+EXCEPTION to the IT consulting auto-reject: Two-sided marketplaces where independent workers (clinicians, drivers, tutors, freelancers, contractors) transact directly with buyers through an app or platform are NOT IT consulting. 
+Examples: Uber, DoorDash, Upwork, Medely, Nomad Health, Trusted Health. The IT-consulting rule applies only when the company directly employs the workers and bills clients for those workers' time as professional services (e.g., Infosys, TCS, Accenture-style consultancies).
+If after applying the exception this rule still matches, stop and return NOT Digital-native or digitally critical.
+FINAL TIEBREAKER — Digital vs NOT:
 Ask: “If the digital platform went down or degraded, would it materially affect revenue, customer experience, operations, support, or brand trust?”
 
 - If YES, classify as Digital-native or Digitally critical.
@@ -187,6 +196,12 @@ Then ask:
 - If YES, use Digital-native.
 - If NO, use Digitally critical.
 
+ORDER OF OPERATIONS: 
+(1) Check IT Consulting special case (and its exception). If it applies, return NOT and stop. 
+(2) Otherwise apply Rules 1–7. 
+(3) If B2B vs B2B2C is unclear, apply the B2B vs B2B2C tiebreaker. 
+(4) If digital vs NOT is unclear, apply the final tiebreaker.
+
 RESEARCH STEPS:
 
 1. Visit the company’s homepage, About page, product pages, careers page, engineering blog, app pages, and relevant public documentation.
@@ -196,6 +211,7 @@ RESEARCH STEPS:
 5. Determine whether downtime or degradation of the digital surface would affect revenue, transactions, customer experience, support, operations, or brand trust.
 6. Apply Rules 1 → 7 and the Tiebreaker.
 7. Select EXACTLY ONE category.
+
 
 
 For each input company domain, return one object in the "companies" array with:

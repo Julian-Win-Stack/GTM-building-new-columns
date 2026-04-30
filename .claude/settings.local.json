@@ -21,7 +21,9 @@
       "WebFetch(domain:theirstack.com)",
       "Bash(tsx -e ' *)",
       "Bash(npx tsx -e ' *)",
-      "Bash(npx tsx *)"
+      "Bash(npx tsx *)",
+      "WebFetch(domain:apify.com)",
+      "Bash(npx vitest *)"
     ]
   }
 }

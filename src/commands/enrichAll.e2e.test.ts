@@ -999,3 +999,218 @@ describe('Stage 18 hash-gate', () => {
     expect(stage18JudgeCalls).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cancel coverage — mid-stage (the realistic case)
+//
+// User cost concern: when cancel fires mid-fetch in stage N, no API belonging
+// to any stage > N may be called. Cancel triggers from *inside* the stage's
+// own API mock so it races against the in-flight call. Parameterized across
+// all 21 stages — sampling cannot catch a single missing bailIfCancelled.
+// ---------------------------------------------------------------------------
+describe('cancel coverage — mid-stage', () => {
+  // Default judge responses (mirrors the beforeEach default) — used as the
+  // fallback for unrelated schemas when overriding judge for score-stage cancels.
+  function defaultJudgeResponse(args: { schema?: { name?: string } }): Promise<unknown> {
+    switch (args.schema?.name) {
+      case 'company_context_score':
+        return Promise.resolve({ score: 4.5, reasoning: 'High-scale platform.' });
+      case 'tooling_match_score':
+        return Promise.resolve({
+          communication_tool_score: 5,
+          competitor_tooling_score: 5,
+          observability_tool_score: 5,
+          cloud_tool_score: 5,
+          justification: {
+            communication_tool: 'Slack confirmed',
+            competitor_tooling: 'No competitors',
+            observability_tool: 'Datadog sole',
+            cloud_tool: 'AWS confirmed',
+          },
+        });
+      case 'intent_signal_score':
+        return Promise.resolve({ score: 4.5, reasoning: 'Strong intent signals.' });
+      case 'final_score_reasoning':
+        return Promise.resolve({ reasoning: 'Strong overall ICP fit with clear intent signals.' });
+      default:
+        return Promise.resolve({ verdict: 'yes', reason: 'confirmed' });
+    }
+  }
+
+  // Same stage→mock count helper as the between-stages block.
+  function stageApiCalls(stage: number): Array<{ name: string; count: number }> {
+    const judgeCallsBySchema = (schemaName: string): number =>
+      (m.judge.mock.calls as Array<[{ schema?: { name?: string } }]>).filter(
+        ([args]) => args.schema?.name === schemaName
+      ).length;
+
+    switch (stage) {
+      case 1: return [{ name: 'theirstackJobsByAnySlugs', count: m.theirstackJobsByAnySlugs.mock.calls.length }];
+      case 2: return [{ name: 'digitalNativeExaSearch', count: m.digitalNativeExaSearch.mock.calls.length }];
+      case 3: return [{ name: 'numberOfUsersExaSearch', count: m.numberOfUsersExaSearch.mock.calls.length }];
+      case 4: return [{ name: 'observabilityToolExaSearch', count: m.observabilityToolExaSearch.mock.calls.length }];
+      case 5: return [{ name: 'theirstackJobsByTechnology', count: m.theirstackJobsByTechnology.mock.calls.length }];
+      case 6: return [{ name: 'cloudToolExaSearch', count: m.cloudToolExaSearch.mock.calls.length }];
+      case 7: return [{ name: 'fundingGrowthExaSearch', count: m.fundingGrowthExaSearch.mock.calls.length }];
+      case 8: return [{ name: 'revenueGrowthExaSearch', count: m.revenueGrowthExaSearch.mock.calls.length }];
+      case 9: return [{ name: 'apolloMixedPeopleApiSearch', count: m.apolloMixedPeopleApiSearch.mock.calls.length }];
+      case 10: return [{ name: 'runHarvestLinkedInEmployees', count: m.runHarvestLinkedInEmployees.mock.calls.length }];
+      case 11:
+      case 12: return [{ name: 'runCareerSiteJobListings (stages 11+12)', count: m.runCareerSiteJobListings.mock.calls.length }];
+      case 13: return [{ name: 'fetchComplaintTweets', count: m.fetchComplaintTweets.mock.calls.length }];
+      case 14: return [{ name: 'fetchRecentIncidents', count: m.fetchRecentIncidents.mock.calls.length }];
+      case 15: return [{ name: 'aiAdoptionMindsetExaSearch', count: m.aiAdoptionMindsetExaSearch.mock.calls.length }];
+      case 16: return [{ name: 'aiSreMaturityExaSearch', count: m.aiSreMaturityExaSearch.mock.calls.length }];
+      case 17: return [{ name: 'industryExaSearch', count: m.industryExaSearch.mock.calls.length }];
+      case 18: return [{ name: 'judge(company_context_score)', count: judgeCallsBySchema('company_context_score') }];
+      case 19: return [{ name: 'judge(tooling_match_score)', count: judgeCallsBySchema('tooling_match_score') }];
+      case 20: return [{ name: 'judge(intent_signal_score)', count: judgeCallsBySchema('intent_signal_score') }];
+      case 21: return [{ name: 'judge(final_score_reasoning)', count: judgeCallsBySchema('final_score_reasoning') }];
+      default: return [];
+    }
+  }
+
+  // Stage 12 shares Apify with Stage 11 — there's no distinct stage-12 call
+  // we can interrupt mid-flight. Cancel during the shared call is exactly
+  // "cancel during stages 11+12" and is already covered by stage 11.
+  const stages = Array.from({ length: 21 }, (_, i) => i + 1).filter((s) => s !== 12);
+
+  it.each(stages)(
+    'cancel during stage %i (mid-API-call): no API call for any later stage',
+    async (cancelDuringStage) => {
+      const csvPath = await makeCsv(tmpDir, [
+        {
+          'Company Name': 'Acme',
+          Website: 'acme.com',
+          'Company Linkedin Url': 'https://linkedin.com/company/acme',
+          'Short Description': 'SaaS platform',
+        },
+      ]);
+      defaultExaMocks(['acme.com']);
+
+      let triggerCancel: () => void = () => {};
+      const cancelSignal = new Promise<never>((_, reject) => {
+        triggerCancel = () => reject(new Error('cancelled'));
+      });
+      cancelSignal.catch(() => {});
+
+      let cancelFlag = false;
+      const isCancelled = (): boolean => cancelFlag;
+      const onEvent = (): void => {};
+
+      // The "user clicks Cancel mid-fetch" simulator. Called from inside the
+      // target stage's mock: synchronously trips both cancel signals, then
+      // throws so the rate-limiter queue releases. The pipeline's runStage
+      // catches the rejection, sees isCancelled is true on the next retry
+      // attempt, and bails out — same end state as a real mid-flight cancel.
+      const fireCancel = async (): Promise<never> => {
+        cancelFlag = true;
+        triggerCancel();
+        throw new Error('cancelled');
+      };
+
+      switch (cancelDuringStage) {
+        case 1:
+          m.theirstackJobsByAnySlugs.mockImplementationOnce(fireCancel);
+          break;
+        case 2:
+          m.digitalNativeExaSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 3:
+          m.numberOfUsersExaSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 4:
+          m.observabilityToolExaSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 5:
+          // Stage 5 calls theirstackJobsByTechnology twice (slack + msteams probes
+          // per company). Override the FIRST call to fire cancel; the others won't
+          // run because the runStage cancels the batch.
+          m.theirstackJobsByTechnology.mockImplementationOnce(fireCancel);
+          break;
+        case 6:
+          m.cloudToolExaSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 7:
+          m.fundingGrowthExaSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 8:
+          m.revenueGrowthExaSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 9:
+          m.apolloMixedPeopleApiSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 10:
+          m.runHarvestLinkedInEmployees.mockImplementationOnce(fireCancel);
+          break;
+        case 11:
+          m.runCareerSiteJobListings.mockImplementationOnce(fireCancel);
+          break;
+        case 13:
+          m.fetchComplaintTweets.mockImplementationOnce(fireCancel);
+          break;
+        case 14:
+          m.fetchRecentIncidents.mockImplementationOnce(fireCancel);
+          break;
+        case 15:
+          m.aiAdoptionMindsetExaSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 16:
+          m.aiSreMaturityExaSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 17:
+          m.industryExaSearch.mockImplementationOnce(fireCancel);
+          break;
+        case 18:
+        case 19:
+        case 20:
+        case 21: {
+          // Score stages share judge. Override its implementation so the FIRST
+          // call matching the target schema fires cancel; everything else
+          // returns the default response so unrelated stage 18 → 21 plumbing
+          // (which shouldn't run anyway after cancel) doesn't deadlock.
+          const targetSchema =
+            cancelDuringStage === 18 ? 'company_context_score'
+            : cancelDuringStage === 19 ? 'tooling_match_score'
+            : cancelDuringStage === 20 ? 'intent_signal_score'
+            : 'final_score_reasoning';
+          let fired = false;
+          m.judge.mockImplementation(async (args: { schema?: { name?: string } }) => {
+            if (!fired && args.schema?.name === targetSchema) {
+              fired = true;
+              return fireCancel();
+            }
+            return defaultJudgeResponse(args);
+          });
+          break;
+        }
+      }
+
+      await enrichAll({
+        csv: csvPath,
+        skipConfirm: true,
+        onEvent,
+        isCancelled,
+        cancelSignal,
+      });
+
+      // Cancel must have actually fired — guards against a silently broken
+      // override that lets the run finish normally.
+      expect(cancelFlag).toBe(true);
+
+      // Every stage strictly after the cancel point must have made zero API
+      // calls. Failure here = a missing bailIfCancelled or cancelSignal race.
+      for (let later = cancelDuringStage + 1; later <= 21; later++) {
+        // Same shared-call edge case as the between-stages block.
+        if (cancelDuringStage === 11 && later === 12) continue;
+        for (const { name, count } of stageApiCalls(later)) {
+          expect(
+            count,
+            `stage ${later} API "${name}" was called ${count} time(s) after cancel triggered during stage ${cancelDuringStage}`
+          ).toBe(0);
+        }
+      }
+    },
+    10_000
+  );
+});
