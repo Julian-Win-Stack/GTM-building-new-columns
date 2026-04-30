@@ -217,7 +217,7 @@ export function ControlDeck({ disabled, onSubmit }: Props) {
               <input
                 type="text"
                 className="ctrl__input"
-                placeholder="acme.com"
+                placeholder="www.acme.com or acme.com"
                 value={manual.website}
                 onChange={(e) => setManual((m) => ({ ...m, website: e.target.value }))}
                 disabled={disabled}
