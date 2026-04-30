@@ -244,7 +244,7 @@ Reasoning: <2–4 sentences covering product nature, reliability sensitivity, in
 ```
 Score: 0–5 in 0.5 increments. Per-company (batchSize: 1). Uses `AZURE_OPENAI_DEPLOYMENT_PRO`.
 
-**Hash-gating:** sha256 hash of all 17 prior enrichable column values stored in `change_detection_column_for_developer`. Re-scores only when hash differs or is missing. Durable across machines (stored in Attio). Adding a new upstream enrichable column automatically invalidates all hashes → full re-score on next run.
+**Hash-gating:** sha256 hash of all 17 prior enrichable column values stored in the **Company Context Score Change Detection for Developer** column (slug `company_context_change_detection_column_for_developer`). Re-scores only when hash differs or is missing. Durable across machines (stored in Attio). Adding a new upstream enrichable column automatically invalidates all hashes → full re-score on next run.
 
 ---
 

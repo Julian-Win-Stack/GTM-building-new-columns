@@ -45,7 +45,7 @@ If Apify returns `statusMessage === 'rate limited'` (LinkedIn hourly cap), `runH
 | `APIFY_RETRY_TRIES` | 3 | |
 | `APIFY_RETRY_BASE_MS` | 2000 | |
 | `X_API_KEYS` | (required) | Comma-separated twitterapi.io keys; fallback: `X_API_KEY` for a single key |
-| `TWITTER_API_QPS` | 10 | calls/sec **per key** |
+| `TWITTER_API_QPS` | 19 | calls/sec **per key** |
 | `TWITTER_API_RETRY_TRIES` | 3 | |
 | `TWITTER_API_RETRY_BASE_MS` | 1000 | |
 | `STATUSPAGE_CONCURRENCY` | 20 | max concurrent probes |
