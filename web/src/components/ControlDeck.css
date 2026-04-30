@@ -18,9 +18,18 @@
 
 .ctrl__header {
   display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.ctrl__header-left {
+  display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 22px;
+  min-width: 0;
 }
 
 .ctrl__eyebrow {
@@ -37,6 +46,67 @@
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-primary);
+}
+
+/* --- Segmented mode toggle (CSV / Single company) --- */
+.seg {
+  position: relative;
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 3px;
+  isolation: isolate;
+}
+
+.seg__opt {
+  position: relative;
+  z-index: 1;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  color: var(--text-muted);
+  border-radius: 999px;
+  transition: color 220ms var(--ease-out);
+  white-space: nowrap;
+}
+
+.seg__opt:hover:not(:disabled):not(.seg__opt--active) {
+  color: var(--text-secondary);
+}
+
+.seg__opt--active {
+  color: var(--text-primary);
+}
+
+.seg__opt:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.seg__rail {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: calc(50% - 3px);
+  background: var(--surface-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  transition: transform 320ms var(--ease-out);
+  pointer-events: none;
+  z-index: 0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 0 0 1px rgba(25, 226, 176, 0.06);
+}
+
+.seg__rail--csv {
+  transform: translateX(0);
+}
+
+.seg__rail--manual {
+  transform: translateX(100%);
 }
 
 .ctrl__grid {
@@ -71,6 +141,16 @@
   font-weight: 400;
   margin-left: 6px;
   font-size: 11px;
+}
+
+.ctrl__required {
+  color: var(--accent);
+  font-weight: 400;
+  margin-left: 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.75;
 }
 
 .ctrl__input {
@@ -309,4 +389,101 @@
 
 .btn--primary:hover:not(:disabled) .btn__arrow {
   transform: translateX(2px);
+}
+
+/* --- Manual single-company mode --- */
+.ctrl__manual {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: manual-fade-in 280ms var(--ease-out);
+}
+
+@keyframes manual-fade-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.manual__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 20px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .manual__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.manual__field {
+  min-width: 0;
+}
+
+.manual__field--wide {
+  grid-column: 1 / -1;
+}
+
+.ctrl__textarea {
+  resize: vertical;
+  min-height: 76px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  font-family: inherit;
+}
+
+/* --- Apollo / Outreach Automation notice --- */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--warm-dim);
+  border: 1px solid rgba(245, 193, 108, 0.22);
+  border-left: 2px solid var(--warm);
+  border-radius: var(--radius-md);
+  animation: manual-fade-in 320ms var(--ease-out) 60ms backwards;
+}
+
+.notice__mark {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(245, 193, 108, 0.18);
+  color: var(--warm);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+.notice__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.notice__title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--warm);
+}
+
+.notice__text {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.notice__text strong {
+  color: var(--text-primary);
+  font-weight: 500;
 }
