@@ -135,11 +135,9 @@ async function attioUpsertWithCancel(
     console.log(`${tag}attioUpsertWithCancel: SKIPPED (cancelled before send) domain=${domain ?? '?'} cols=[${cols.join(', ')}]`);
     return;
   }
-  console.log(`${tag}attioUpsertWithCancel: SENDING domain=${domain ?? '?'} cols=[${cols.join(', ')}]`);
   const writePromise = attioWriteLimit(() => upsertCompanyByDomain(data));
   try {
     await (ctx.cancelSignal ? Promise.race([writePromise, ctx.cancelSignal]) : writePromise);
-    console.log(`${tag}attioUpsertWithCancel: OK domain=${domain ?? '?'} cols=[${cols.join(', ')}]`);
   } catch (err) {
     if (ctx.isCancelled?.()) {
       console.log(`${tag}attioUpsertWithCancel: cancel-suppressed error domain=${domain ?? '?'}`);
@@ -1083,17 +1081,12 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     afterBatch: async (batchResults) => {
       const errored = batchResults.filter((r) => r.error !== undefined);
       const successful = batchResults.filter((r) => r.error === undefined);
-      console.log(`[contextScore] afterBatch: results=${batchResults.length} errored=${errored.length} writable=${successful.length}`);
-      for (const r of errored) {
-        console.log(`[contextScore] afterBatch: skipping ${r.company.domain} (parse error: ${r.error})`);
-      }
       let wrote = 0;
       let threw = 0;
       for (const r of successful) {
         const values = attioCache.get(r.company.domain) ?? {};
         const hash = computeInputHash(values, enrichableSlugsForHash);
         const cell = formatContextScoreForAttio(r.data);
-        console.log(`[contextScore] writing ${r.company.domain} score=${r.data.score} cellLen=${cell.length} hash=${hash.slice(0, 8)}…`);
         try {
           await attioUpsertWithCancel(ctx, {
             'Company Name': r.company.companyName,
@@ -1161,17 +1154,12 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     afterBatch: async (batchResults) => {
       const errored = batchResults.filter((r) => r.error !== undefined);
       const successful = batchResults.filter((r) => r.error === undefined);
-      console.log(`[toolingMatchScore] afterBatch: results=${batchResults.length} errored=${errored.length} writable=${successful.length}`);
-      for (const r of errored) {
-        console.log(`[toolingMatchScore] afterBatch: skipping ${r.company.domain} (parse error: ${r.error})`);
-      }
       let wrote = 0;
       let threw = 0;
       for (const r of successful) {
         const values = attioCache.get(r.company.domain) ?? {};
         const hash = computeInputHash(values, toolingInputSlugs);
         const cell = formatToolingMatchScoreForAttio(r.data);
-        console.log(`[toolingMatchScore] writing ${r.company.domain} score=${r.data.finalToolScore} cellLen=${cell.length} hash=${hash.slice(0, 8)}…`);
         try {
           await attioUpsertWithCancel(ctx, {
             'Company Name': r.company.companyName,
@@ -1239,17 +1227,12 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     afterBatch: async (batchResults) => {
       const errored = batchResults.filter((r) => r.error !== undefined);
       const successful = batchResults.filter((r) => r.error === undefined);
-      console.log(`[intentSignalScore] afterBatch: results=${batchResults.length} errored=${errored.length} writable=${successful.length}`);
-      for (const r of errored) {
-        console.log(`[intentSignalScore] afterBatch: skipping ${r.company.domain} (parse error: ${r.error})`);
-      }
       let wrote = 0;
       let threw = 0;
       for (const r of successful) {
         const values = attioCache.get(r.company.domain) ?? {};
         const hash = computeInputHash(values, intentInputSlugs);
         const cell = formatIntentSignalScoreForAttio(r.data);
-        console.log(`[intentSignalScore] writing ${r.company.domain} score=${r.data.score} cellLen=${cell.length} hash=${hash.slice(0, 8)}…`);
         try {
           await attioUpsertWithCancel(ctx, {
             'Company Name': r.company.companyName,
@@ -1318,17 +1301,12 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     afterBatch: async (batchResults) => {
       const errored = batchResults.filter((r) => r.error !== undefined);
       const successful = batchResults.filter((r) => r.error === undefined);
-      console.log(`[finalScore] afterBatch: results=${batchResults.length} errored=${errored.length} writable=${successful.length}`);
-      for (const r of errored) {
-        console.log(`[finalScore] afterBatch: skipping ${r.company.domain} (parse error: ${r.error})`);
-      }
       let wrote = 0;
       let threw = 0;
       for (const r of successful) {
         const values = attioCache.get(r.company.domain) ?? {};
         const hash = computeInputHash(values, finalInputSlugs);
         const cell = formatFinalScoreForAttio(r.data);
-        console.log(`[finalScore] writing ${r.company.domain} score=${r.data.finalScore} tier=${r.data.tier} cellLen=${cell.length} hash=${hash.slice(0, 8)}…`);
         try {
           await attioUpsertWithCancel(ctx, {
             'Company Name': r.company.companyName,
