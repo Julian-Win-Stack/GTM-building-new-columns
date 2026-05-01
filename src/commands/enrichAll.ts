@@ -125,14 +125,35 @@ function setAndEmit(
 // Attio upsert with cancel-race. Returns silently on cancel. Throws on real errors.
 async function attioUpsertWithCancel(
   ctx: RunCtx,
-  data: Partial<EnrichmentResult>
+  data: Partial<EnrichmentResult>,
+  logTag?: string
 ): Promise<void> {
-  if (ctx.isCancelled?.()) return;
+  const tag = logTag ? `[${logTag}] ` : '';
+  const domain = (data as Record<string, unknown>)['Domain'] as string | undefined;
+  const cols = Object.keys(data).filter((k) => k !== 'Company Name' && k !== 'Domain');
+  if (ctx.isCancelled?.()) {
+    console.log(`${tag}attioUpsertWithCancel: SKIPPED (cancelled before send) domain=${domain ?? '?'} cols=[${cols.join(', ')}]`);
+    return;
+  }
+  console.log(`${tag}attioUpsertWithCancel: SENDING domain=${domain ?? '?'} cols=[${cols.join(', ')}]`);
   const writePromise = attioWriteLimit(() => upsertCompanyByDomain(data));
   try {
     await (ctx.cancelSignal ? Promise.race([writePromise, ctx.cancelSignal]) : writePromise);
+    console.log(`${tag}attioUpsertWithCancel: OK domain=${domain ?? '?'} cols=[${cols.join(', ')}]`);
   } catch (err) {
-    if (ctx.isCancelled?.()) return;
+    if (ctx.isCancelled?.()) {
+      console.log(`${tag}attioUpsertWithCancel: cancel-suppressed error domain=${domain ?? '?'}`);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    let extra = '';
+    if (typeof err === 'object' && err !== null && 'isAxiosError' in err) {
+      const ax = err as { response?: { status?: number; data?: unknown }; config?: { url?: string; method?: string } };
+      const status = ax.response?.status;
+      const respData = (() => { try { return JSON.stringify(ax.response?.data).slice(0, 600); } catch { return '<unserializable>'; } })();
+      extra = ` status=${status} url=${ax.config?.method?.toUpperCase()} ${ax.config?.url} body=${respData}`;
+    }
+    console.error(`${tag}attioUpsertWithCancel: THREW domain=${domain ?? '?'} cols=[${cols.join(', ')}]: ${msg}${extra}`);
     throw err;
   }
 }
@@ -1060,17 +1081,33 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
       return [{ company, data }];
     },
     afterBatch: async (batchResults) => {
-      for (const r of batchResults) {
-        if (r.error !== undefined) continue;
+      const errored = batchResults.filter((r) => r.error !== undefined);
+      const successful = batchResults.filter((r) => r.error === undefined);
+      console.log(`[contextScore] afterBatch: results=${batchResults.length} errored=${errored.length} writable=${successful.length}`);
+      for (const r of errored) {
+        console.log(`[contextScore] afterBatch: skipping ${r.company.domain} (parse error: ${r.error})`);
+      }
+      let wrote = 0;
+      let threw = 0;
+      for (const r of successful) {
         const values = attioCache.get(r.company.domain) ?? {};
         const hash = computeInputHash(values, enrichableSlugsForHash);
         const cell = formatContextScoreForAttio(r.data);
-        await attioUpsertWithCancel(ctx, {
-          'Company Name': r.company.companyName,
-          'Domain': r.company.domain,
-          'Company Context Score': cell,
-          'Company Context Score Change Detection for Developer': hash,
-        });
+        console.log(`[contextScore] writing ${r.company.domain} score=${r.data.score} cellLen=${cell.length} hash=${hash.slice(0, 8)}…`);
+        try {
+          await attioUpsertWithCancel(ctx, {
+            'Company Name': r.company.companyName,
+            'Domain': r.company.domain,
+            'Company Context Score': cell,
+            'Company Context Score Change Detection for Developer': hash,
+          }, 'contextScore');
+          wrote++;
+        } catch (err) {
+          threw++;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[contextScore] write failed for ${r.company.domain}: ${msg} — continuing with remaining companies`);
+          continue;
+        }
         setAndEmit(
           ctx,
           attioCache,
@@ -1082,6 +1119,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
           ]
         );
       }
+      console.log(`[contextScore] afterBatch summary: wrote=${wrote} threw=${threw} errored=${errored.length}`);
     },
   });
   ctx.emit({ type: 'stage-completed', stageNumber: 18, stageName: 'Company Context Score' });
@@ -1121,17 +1159,33 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
       return [{ company, data }];
     },
     afterBatch: async (batchResults) => {
-      for (const r of batchResults) {
-        if (r.error !== undefined) continue;
+      const errored = batchResults.filter((r) => r.error !== undefined);
+      const successful = batchResults.filter((r) => r.error === undefined);
+      console.log(`[toolingMatchScore] afterBatch: results=${batchResults.length} errored=${errored.length} writable=${successful.length}`);
+      for (const r of errored) {
+        console.log(`[toolingMatchScore] afterBatch: skipping ${r.company.domain} (parse error: ${r.error})`);
+      }
+      let wrote = 0;
+      let threw = 0;
+      for (const r of successful) {
         const values = attioCache.get(r.company.domain) ?? {};
         const hash = computeInputHash(values, toolingInputSlugs);
         const cell = formatToolingMatchScoreForAttio(r.data);
-        await attioUpsertWithCancel(ctx, {
-          'Company Name': r.company.companyName,
-          'Domain': r.company.domain,
-          'Tooling Match Score': cell,
-          'Tooling Match Change Detection for Developer': hash,
-        });
+        console.log(`[toolingMatchScore] writing ${r.company.domain} score=${r.data.finalToolScore} cellLen=${cell.length} hash=${hash.slice(0, 8)}…`);
+        try {
+          await attioUpsertWithCancel(ctx, {
+            'Company Name': r.company.companyName,
+            'Domain': r.company.domain,
+            'Tooling Match Score': cell,
+            'Tooling Match Change Detection for Developer': hash,
+          }, 'toolingMatchScore');
+          wrote++;
+        } catch (err) {
+          threw++;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[toolingMatchScore] write failed for ${r.company.domain}: ${msg} — continuing with remaining companies`);
+          continue;
+        }
         setAndEmit(
           ctx,
           attioCache,
@@ -1143,6 +1197,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
           ]
         );
       }
+      console.log(`[toolingMatchScore] afterBatch summary: wrote=${wrote} threw=${threw} errored=${errored.length}`);
     },
   });
   ctx.emit({ type: 'stage-completed', stageNumber: 19, stageName: 'Tooling Match Score' });
@@ -1182,17 +1237,33 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
       return [{ company, data }];
     },
     afterBatch: async (batchResults) => {
-      for (const r of batchResults) {
-        if (r.error !== undefined) continue;
+      const errored = batchResults.filter((r) => r.error !== undefined);
+      const successful = batchResults.filter((r) => r.error === undefined);
+      console.log(`[intentSignalScore] afterBatch: results=${batchResults.length} errored=${errored.length} writable=${successful.length}`);
+      for (const r of errored) {
+        console.log(`[intentSignalScore] afterBatch: skipping ${r.company.domain} (parse error: ${r.error})`);
+      }
+      let wrote = 0;
+      let threw = 0;
+      for (const r of successful) {
         const values = attioCache.get(r.company.domain) ?? {};
         const hash = computeInputHash(values, intentInputSlugs);
         const cell = formatIntentSignalScoreForAttio(r.data);
-        await attioUpsertWithCancel(ctx, {
-          'Company Name': r.company.companyName,
-          'Domain': r.company.domain,
-          'Intent Signal Score': cell,
-          'Intent Signal Change Detection for Developer': hash,
-        });
+        console.log(`[intentSignalScore] writing ${r.company.domain} score=${r.data.score} cellLen=${cell.length} hash=${hash.slice(0, 8)}…`);
+        try {
+          await attioUpsertWithCancel(ctx, {
+            'Company Name': r.company.companyName,
+            'Domain': r.company.domain,
+            'Intent Signal Score': cell,
+            'Intent Signal Change Detection for Developer': hash,
+          }, 'intentSignalScore');
+          wrote++;
+        } catch (err) {
+          threw++;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[intentSignalScore] write failed for ${r.company.domain}: ${msg} — continuing with remaining companies`);
+          continue;
+        }
         setAndEmit(
           ctx,
           attioCache,
@@ -1204,6 +1275,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
           ]
         );
       }
+      console.log(`[intentSignalScore] afterBatch summary: wrote=${wrote} threw=${threw} errored=${errored.length}`);
     },
   });
   ctx.emit({ type: 'stage-completed', stageNumber: 20, stageName: 'Intent Signal Score' });
@@ -1244,17 +1316,33 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
       return [{ company, data }];
     },
     afterBatch: async (batchResults) => {
-      for (const r of batchResults) {
-        if (r.error !== undefined) continue;
+      const errored = batchResults.filter((r) => r.error !== undefined);
+      const successful = batchResults.filter((r) => r.error === undefined);
+      console.log(`[finalScore] afterBatch: results=${batchResults.length} errored=${errored.length} writable=${successful.length}`);
+      for (const r of errored) {
+        console.log(`[finalScore] afterBatch: skipping ${r.company.domain} (parse error: ${r.error})`);
+      }
+      let wrote = 0;
+      let threw = 0;
+      for (const r of successful) {
         const values = attioCache.get(r.company.domain) ?? {};
         const hash = computeInputHash(values, finalInputSlugs);
         const cell = formatFinalScoreForAttio(r.data);
-        await attioUpsertWithCancel(ctx, {
-          'Company Name': r.company.companyName,
-          'Domain': r.company.domain,
-          'Final Score': cell,
-          'Final Score Change Detection for Developer': hash,
-        });
+        console.log(`[finalScore] writing ${r.company.domain} score=${r.data.finalScore} tier=${r.data.tier} cellLen=${cell.length} hash=${hash.slice(0, 8)}…`);
+        try {
+          await attioUpsertWithCancel(ctx, {
+            'Company Name': r.company.companyName,
+            'Domain': r.company.domain,
+            'Final Score': cell,
+            'Final Score Change Detection for Developer': hash,
+          }, 'finalScore');
+          wrote++;
+        } catch (err) {
+          threw++;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[finalScore] write failed for ${r.company.domain}: ${msg} — continuing with remaining companies`);
+          continue;
+        }
         setAndEmit(
           ctx,
           attioCache,
@@ -1266,6 +1354,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
           ]
         );
       }
+      console.log(`[finalScore] afterBatch summary: wrote=${wrote} threw=${threw} errored=${errored.length}`);
     },
   });
   ctx.emit({ type: 'stage-completed', stageNumber: 21, stageName: 'Final Score' });
