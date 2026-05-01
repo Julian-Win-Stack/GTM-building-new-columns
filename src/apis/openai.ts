@@ -23,20 +23,39 @@ export type JudgeArgs = {
 
 export async function judge<T = Record<string, unknown>>(args: JudgeArgs): Promise<T> {
   const { system, user, model = AZURE_DEPLOYMENT_DEFAULT, schema } = args;
-  const res = await openai.chat.completions.create({
-    model,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-    ...(schema
-      ? { response_format: { type: 'json_schema', json_schema: schema } as const }
-      : { response_format: { type: 'json_object' } as const }),
-  });
-  const text = res.choices[0]?.message?.content ?? '{}';
+  const responseFormat = schema
+    ? ({ type: 'json_schema', json_schema: schema } as const)
+    : ({ type: 'json_object' } as const);
   try {
-    return JSON.parse(text) as T;
-  } catch {
-    return { _raw: text } as unknown as T;
+    const res = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      response_format: responseFormat,
+    });
+    const text = res.choices[0]?.message?.content ?? '{}';
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return { _raw: text } as unknown as T;
+    }
+  } catch (err) {
+    const e = err as {
+      status?: number;
+      code?: string | null;
+      type?: string | null;
+      message?: string;
+      error?: { code?: string; message?: string; type?: string; param?: string };
+    };
+    let body = '<no body>';
+    try { body = JSON.stringify(e.error ?? {}).slice(0, 800); } catch { /* noop */ }
+    console.error(
+      `[openai.judge] FAILED model=${model} responseFormat=${responseFormat.type}` +
+      ` status=${e.status} code=${e.code} type=${e.type} message=${e.message}` +
+      ` body=${body}`
+    );
+    throw err;
   }
 }
