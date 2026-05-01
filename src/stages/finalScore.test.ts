@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../apis/openai.js', () => ({ judge: vi.fn() }));
+vi.mock('../apis/openai.js', () => ({
+  judge: vi.fn(),
+  AZURE_DEPLOYMENT_DEFAULT: 'gpt-5.4',
+  AZURE_DEPLOYMENT_PRO: 'gpt-5.4-pro',
+}));
 vi.mock('../rateLimit.js', () => ({
   openaiLimit: (fn: () => unknown) => fn(),
-}));
-vi.mock('../config.js', () => ({
-  KEYS: { azureOpenAIDeployment: 'test-deployment', azureOpenAIDeploymentPro: '' },
 }));
 vi.mock('../util.js', () => ({
   withRetry: (fn: () => unknown) => fn(),
@@ -182,7 +183,7 @@ describe('scoreFinal', () => {
     mockJudge.mockResolvedValue({ reasoning: 'Strong overall fit.' });
     await scoreFinal(COMPANY, VALUES_VALID);
     expect(mockJudge).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'test-deployment' })
+      expect.objectContaining({ model: 'gpt-5.4' })
     );
   });
 

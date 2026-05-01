@@ -26,8 +26,6 @@ export const KEYS = {
   theirstack: process.env.THEIRSTACK_API_KEY ?? '',
   azureOpenAIKey: process.env.AZURE_OPENAI_API_KEY ?? '',
   azureOpenAIBaseUrl: process.env.AZURE_OPENAI_BASE_URL ?? '',
-  azureOpenAIDeployment: process.env.AZURE_OPENAI_DEPLOYMENT ?? '',
-  azureOpenAIDeploymentPro: process.env.AZURE_OPENAI_DEPLOYMENT_PRO ?? '',
   attio: process.env.ATTIO_API_KEY ?? '',
   apollo: process.env.APOLLO_API_KEY ?? '',
 } as const;

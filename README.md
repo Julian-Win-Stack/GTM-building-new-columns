@@ -154,7 +154,7 @@ Copy `.env.example` to `.env` and fill in all values. `.env` is gitignored and m
 | Apollo | `APOLLO_API_KEY`, `APOLLO_QPS`, `APOLLO_RETRY_TRIES`, `APOLLO_RETRY_BASE_MS` |
 | twitterapi.io | `X_API_KEYS` (or `X_API_KEY` for a single key), `TWITTER_API_QPS`, `TWITTER_API_RETRY_TRIES`, `TWITTER_API_RETRY_BASE_MS` |
 | Statuspage | `STATUSPAGE_CONCURRENCY`, `STATUSPAGE_RETRY_TRIES`, `STATUSPAGE_RETRY_BASE_MS` |
-| Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_DEPLOYMENT_PRO`, `OPENAI_CONCURRENCY` |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_BASE_URL`, `OPENAI_CONCURRENCY` (deployment names are hardcoded in `src/apis/openai.ts`) |
 | Pipeline | `CONCURRENCY`, `ATTIO_WRITE_CONCURRENCY` |
 | Server (web UI only) | `PORT`, `NODE_ENV`, `UPLOAD_DIR` |
 

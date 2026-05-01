@@ -9,6 +9,11 @@ export const openai = new OpenAI({
   defaultHeaders: { 'api-key': KEYS.azureOpenAIKey },
 });
 
+// Hardcoded Azure deployment names. Single source of truth so dev and Railway
+// can never drift. Update both deployments in Azure first, then change here.
+export const AZURE_DEPLOYMENT_DEFAULT = 'gpt-5.4';
+export const AZURE_DEPLOYMENT_PRO = 'gpt-5.4-pro';
+
 export type JudgeArgs = {
   system: string;
   user: string;
@@ -17,8 +22,7 @@ export type JudgeArgs = {
 };
 
 export async function judge<T = Record<string, unknown>>(args: JudgeArgs): Promise<T> {
-  // `model` here must be an Azure deployment name (set via AZURE_OPENAI_DEPLOYMENT).
-  const { system, user, model = KEYS.azureOpenAIDeployment || 'gpt-5.4', schema } = args;
+  const { system, user, model = AZURE_DEPLOYMENT_DEFAULT, schema } = args;
   const res = await openai.chat.completions.create({
     model,
     messages: [

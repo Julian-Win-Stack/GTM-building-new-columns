@@ -1,8 +1,7 @@
 import { FIELD_SLUGS } from '../apis/attio.js';
-import { judge } from '../apis/openai.js';
+import { judge, AZURE_DEPLOYMENT_DEFAULT } from '../apis/openai.js';
 import { openaiLimit } from '../rateLimit.js';
 import { withRetry } from '../util.js';
-import { KEYS } from '../config.js';
 import type { StageCompany } from './types.js';
 
 export interface FinalScoreData {
@@ -122,7 +121,7 @@ export async function scoreFinal(
         system: SYSTEM_PROMPT,
         user,
         schema: REASONING_SCHEMA,
-        model: KEYS.azureOpenAIDeployment,
+        model: AZURE_DEPLOYMENT_DEFAULT,
       }),
       { tries: 3, baseMs: 1000, label: `finalScore:${company.domain}` },
     )

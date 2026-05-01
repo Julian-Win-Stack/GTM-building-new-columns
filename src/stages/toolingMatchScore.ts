@@ -1,8 +1,7 @@
 import { FIELD_SLUGS } from '../apis/attio.js';
-import { judge } from '../apis/openai.js';
+import { judge, AZURE_DEPLOYMENT_PRO } from '../apis/openai.js';
 import { openaiLimit } from '../rateLimit.js';
 import { withRetry } from '../util.js';
-import { KEYS } from '../config.js';
 import type { StageCompany } from './types.js';
 
 export interface ToolingMatchScoreData {
@@ -197,7 +196,7 @@ export async function scoreToolingMatch(
         system: SYSTEM_PROMPT,
         user,
         schema: SCORE_SCHEMA,
-        model: KEYS.azureOpenAIDeploymentPro || KEYS.azureOpenAIDeployment,
+        model: AZURE_DEPLOYMENT_PRO,
       }),
       { tries: 3, baseMs: 1000, label: `toolingMatch:${company.domain}` },
     )

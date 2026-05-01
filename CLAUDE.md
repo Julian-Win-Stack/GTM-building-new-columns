@@ -204,7 +204,7 @@ npm test                                # vitest
 - Enrichers: `(input: EnricherInput) => Promise<string>` — return `''` if unavailable
 - All outbound API calls must use their scheduler wrapper: `scheduleExa()`, `scheduleTheirstack()`, `scheduleApollo()`, `scheduleApify()`, `scheduleTwitterApi()`, `scheduleStatuspage()` — never call the underlying client directly
 - Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`)
-- Azure OpenAI deployment for Stages 18/19/20 lives in `KEYS.azureOpenAIDeploymentPro` — never hardcode deployment names in stage files
+- Azure OpenAI deployment names are hardcoded in `src/apis/openai.ts` as `AZURE_DEPLOYMENT_DEFAULT` (`gpt-5.4`) and `AZURE_DEPLOYMENT_PRO` (`gpt-5.4-pro`). Stages 18/19/20 use `AZURE_DEPLOYMENT_PRO`; Stage 21 uses `AZURE_DEPLOYMENT_DEFAULT`. Update both the Azure deployment and this constant in the same change — never split them across files.
 - TheirStack response parsing must check both `technology_slugs` and `technology_names` against machine-readable slug strings — both fields return slugs, never human-readable display names
 - No comments unless the WHY is non-obvious
 - The CSV column order in `server/columns.ts` is mirrored verbatim in `web/src/lib/columns.ts`. When changing one, update the other in the same commit.

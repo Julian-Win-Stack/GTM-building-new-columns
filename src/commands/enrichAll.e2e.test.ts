@@ -48,7 +48,6 @@ const m = vi.hoisted(() => {
   process.env['APIFY_TOKEN'] = 'test-apify';
   process.env['AZURE_OPENAI_API_KEY'] = 'test-openai';
   process.env['AZURE_OPENAI_BASE_URL'] = 'https://test.openai.azure.com';
-  process.env['AZURE_OPENAI_DEPLOYMENT'] = 'test-deployment';
   process.env['X_API_KEY'] = 'test-x';
 
   return {

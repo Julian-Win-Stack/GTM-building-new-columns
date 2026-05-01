@@ -51,4 +51,5 @@ If Apify returns `statusMessage === 'rate limited'` (LinkedIn hourly cap), `runH
 | `STATUSPAGE_CONCURRENCY` | 20 | max concurrent probes |
 | `STATUSPAGE_RETRY_TRIES` | 3 | |
 | `STATUSPAGE_RETRY_BASE_MS` | 1000 | |
-| `AZURE_OPENAI_DEPLOYMENT_PRO` | (empty → falls back to `AZURE_OPENAI_DEPLOYMENT`) | Stronger model used by Stages 18/19/20; set to `gpt-5.4-pro` |
+
+Azure OpenAI deployment names are hardcoded in `src/apis/openai.ts` (`AZURE_DEPLOYMENT_DEFAULT` and `AZURE_DEPLOYMENT_PRO`), not env-driven. Stages 18/19/20 use Pro; Stage 21 uses Default.
