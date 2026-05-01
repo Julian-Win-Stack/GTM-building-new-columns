@@ -5,6 +5,18 @@ export function normalizeLinkedInUrl(raw: string): string {
   return `https://${trimmed}`;
 }
 
+// Attio's `linkedin` attribute is a validated handle field, not free text — it rejects
+// `www.`, `/showcase/` paths, and trailing slashes with `"LinkedIn handle is not valid"`.
+// Bare slugs (e.g. `playstation-sony`) are accepted and Attio renders them as proper
+// LinkedIn links. Returns '' if no slug can be extracted (caller should skip the write).
+export function linkedInSlugForAttio(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (!/[/.]/.test(trimmed)) return trimmed;
+  const match = trimmed.match(/linkedin\.com\/(?:company|showcase|in|school|pub)\/([^/?#]+)/i);
+  return match?.[1] ?? '';
+}
+
 export function deriveDomain(website: string | undefined): string {
   if (!website) return '';
   try {

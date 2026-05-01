@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { normalizeLinkedInUrl, deriveDomain, nowIso, withRetry } from './util.js';
+import { linkedInSlugForAttio, normalizeLinkedInUrl, deriveDomain, nowIso, withRetry } from './util.js';
 
 describe('normalizeLinkedInUrl', () => {
   it('upgrades http:// to https://', () => {
@@ -28,6 +28,38 @@ describe('normalizeLinkedInUrl', () => {
     expect(normalizeLinkedInUrl('  http://www.linkedin.com/company/acme  ')).toBe(
       'https://www.linkedin.com/company/acme'
     );
+  });
+});
+
+describe('linkedInSlugForAttio', () => {
+  it('extracts slug from a /company/ URL', () => {
+    expect(linkedInSlugForAttio('https://www.linkedin.com/company/playstation-sony/')).toBe('playstation-sony');
+  });
+
+  it('extracts slug from a /showcase/ URL', () => {
+    expect(linkedInSlugForAttio('https://www.linkedin.com/showcase/playstation-sony/')).toBe('playstation-sony');
+  });
+
+  it('extracts slug from /in/ and /school/ URLs', () => {
+    expect(linkedInSlugForAttio('https://www.linkedin.com/in/jane-doe')).toBe('jane-doe');
+    expect(linkedInSlugForAttio('https://www.linkedin.com/school/mit/')).toBe('mit');
+  });
+
+  it('strips query string and fragment from the slug', () => {
+    expect(linkedInSlugForAttio('https://www.linkedin.com/company/acme?ref=foo#bar')).toBe('acme');
+  });
+
+  it('passes through a bare slug unchanged', () => {
+    expect(linkedInSlugForAttio('playstation-sony')).toBe('playstation-sony');
+  });
+
+  it('returns empty string when nothing matches', () => {
+    expect(linkedInSlugForAttio('https://example.com/foo/bar')).toBe('');
+    expect(linkedInSlugForAttio('')).toBe('');
+  });
+
+  it('trims whitespace before processing', () => {
+    expect(linkedInSlugForAttio('  https://www.linkedin.com/company/acme  ')).toBe('acme');
   });
 });
 

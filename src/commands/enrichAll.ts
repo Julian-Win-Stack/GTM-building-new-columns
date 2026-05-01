@@ -3,7 +3,7 @@ import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch, aiAdoptionMindsetExaSearch, aiSreMaturityExaSearch, industryExaSearch, type ExaSearchResponse } from '../apis/exa.js';
 import { collectJobUrls, theirstackJobsByTechnology, theirstackJobsByAnySlugs } from '../apis/theirstack.js';
 import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi } from '../rateLimit.js';
-import { deriveDomain, normalizeLinkedInUrl } from '../util.js';
+import { deriveDomain, linkedInSlugForAttio, normalizeLinkedInUrl } from '../util.js';
 import type { EnrichmentResult, InputRow } from '../types.js';
 import type { StageCompany, StageResult } from '../stages/types.js';
 import { runStage } from '../runStage.js';
@@ -322,7 +322,10 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     const toWrite: Partial<EnrichmentResult> = {};
     if (id.name && !existingValues[nameSlug]) toWrite['Company Name'] = id.name;
     if (id.domain && !existingValues[domainSlug]) toWrite['Domain'] = id.domain;
-    if (id.linkedinUrl && !existingValues[linkedinSlug]) toWrite['LinkedIn Page'] = id.linkedinUrl;
+    if (id.linkedinUrl && !existingValues[linkedinSlug]) {
+      const slug = linkedInSlugForAttio(id.linkedinUrl);
+      if (slug) toWrite['LinkedIn Page'] = slug;
+    }
     if (id.description && !existingValues[descriptionSlug]) toWrite['Description'] = id.description;
     if (id.website && !existingValues[websiteSlug]) toWrite['Website'] = id.website;
     if (id.apolloId && !existingValues[apolloIdSlug]) toWrite['Apollo ID'] = id.apolloId;

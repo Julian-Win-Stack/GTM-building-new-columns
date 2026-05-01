@@ -30,7 +30,7 @@ src/
   rateLimit.ts           — scheduleExa/Theirstack/Apollo/Apify/TwitterApi/Statuspage + attioWriteLimit/openaiLimit
   pipeline.ts            — runPipeline (all columns) + runSingleEnricher (one column)
   csv.ts                 — readInputCsv
-  util.ts                — deriveDomain, nowIso, withRetry, normalizeLinkedInUrl
+  util.ts                — deriveDomain, nowIso, withRetry, normalizeLinkedInUrl, linkedInSlugForAttio
   cache.ts               — disk cache helpers
   filterSurvivors.ts     — filterSurvivors (fresh gate) + filterCachedSurvivors (cached gate)
   runStage.ts            — generic stage runner: batching, concurrency, retry

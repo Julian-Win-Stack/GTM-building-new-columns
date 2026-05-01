@@ -390,7 +390,9 @@ describe('input routing', () => {
     expect(identityWriteArg['Company Name']).toBeUndefined();
     // Domain is always the lookup key — it's present but that's structural, not "written"
     // What matters is the toWrite fields:
-    expect(identityWriteArg['LinkedIn Page']).toBe('https://linkedin.com/company/acme');
+    // LinkedIn Page is normalized to a bare slug for Attio's `linkedin` handle field —
+    // full URLs get rejected with "LinkedIn handle is not valid".
+    expect(identityWriteArg['LinkedIn Page']).toBe('acme');
     expect(identityWriteArg['Description']).toBe('A SaaS company');
   });
 
