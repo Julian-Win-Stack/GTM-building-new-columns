@@ -46,22 +46,24 @@ const http = axios.create({
   timeout: 60_000,
 });
 
+// Identity attribute on the Attio object — single source of truth driven by FIELD_SLUGS so
+// swapping objects only requires editing the slug map above, not literal strings throughout.
+const DOMAIN_SLUG = FIELD_SLUGS['Domain']!;
+
 function toAttioValues(data: Partial<EnrichmentResult>): Record<string, unknown> {
   const values: Record<string, unknown> = {};
   for (const [col, val] of Object.entries(data)) {
     const slug = FIELD_SLUGS[col];
     if (!slug || val === undefined || val === '') continue;
-    values[slug] = val;
+    // Attio's `domains` attribute is a multi-value Domain type; writes must be an array
+    // of `{ domain }` objects, not a bare string.
+    values[slug] = slug === DOMAIN_SLUG ? [{ domain: val }] : val;
   }
   return values;
 }
 
 type RawAttioField = Array<{ value?: string; domain_name?: string }>;
 type RawAttioRecord = { id: { record_id: string } | string; values: Record<string, RawAttioField> };
-
-// Identity attribute on the Attio object — single source of truth driven by FIELD_SLUGS so
-// swapping objects only requires editing the slug map above, not literal strings throughout.
-const DOMAIN_SLUG = FIELD_SLUGS['Domain']!;
 
 function extractDomain(rec: RawAttioRecord): string {
   const arr = rec.values?.[DOMAIN_SLUG];

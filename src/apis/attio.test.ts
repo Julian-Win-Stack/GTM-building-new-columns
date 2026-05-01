@@ -88,7 +88,7 @@ describe('createCompany', () => {
         data: {
           values: {
             [COMPANY_NAME_SLUG]: 'Acme',
-            [DOMAIN_SLUG]: 'acme.com',
+            [DOMAIN_SLUG]: [{ domain: 'acme.com' }],
             [DIGITAL_NATIVE_SLUG]: 'Digital-native B2C',
           },
         },
@@ -245,7 +245,7 @@ describe('upsertCompanyByDomain', () => {
     await upsertCompanyByDomain({ 'Company Name': 'Acme', Domain: 'acme.com' });
     const [, body] = httpMock.put.mock.calls[0]!;
     expect(body).toEqual({
-      data: { values: { [COMPANY_NAME_SLUG]: 'Acme', [DOMAIN_SLUG]: 'acme.com' } },
+      data: { values: { [COMPANY_NAME_SLUG]: 'Acme', [DOMAIN_SLUG]: [{ domain: 'acme.com' }] } },
     });
   });
 
@@ -253,7 +253,7 @@ describe('upsertCompanyByDomain', () => {
     httpMock.put.mockResolvedValue({ data: { data: { id: 'rec_1', values: {} } } });
     await upsertCompanyByDomain({ Domain: 'acme.com', Description: 'A widget company' });
     const [, body] = httpMock.put.mock.calls[0]!;
-    expect(body.data.values).toEqual({ [DOMAIN_SLUG]: 'acme.com', [DESCRIPTION_SLUG]: 'A widget company' });
+    expect(body.data.values).toEqual({ [DOMAIN_SLUG]: [{ domain: 'acme.com' }], [DESCRIPTION_SLUG]: 'A widget company' });
   });
 
   it('returns the upserted record', async () => {
