@@ -22,6 +22,9 @@ export function App() {
   // Bumping this key force-remounts ControlDeck, which clears its internal file/account-purpose
   // state — the cleanest way to "reset the file input" without lifting all of its state up.
   const [controlDeckKey, setControlDeckKey] = useState(0);
+  // Set when a run is started with writeToAttio=false: on successful completion the CSV is the
+  // only output, so we trigger the download automatically. Cleared after firing (or on cancel).
+  const [shouldAutoDownload, setShouldAutoDownload] = useState(false);
 
   const { state, cancel } = useRunStream(runId);
   const isRunning =
@@ -35,12 +38,23 @@ export function App() {
       setCancelledSnapshot({ runId, stagesCompleted: state.stagesCompleted });
       setRunId(null);
       setControlDeckKey((k) => k + 1);
+      setShouldAutoDownload(false);
     }
   }, [state.status, state.stagesCompleted, runId]);
+
+  // Auto-download the CSV when a run completes successfully and the user opted out of Attio
+  // writes — the CSV is the only artifact in that case, so saving them a click.
+  useEffect(() => {
+    if (state.status === 'completed' && shouldAutoDownload && runId) {
+      window.location.href = `/api/runs/${runId}/csv`;
+      setShouldAutoDownload(false);
+    }
+  }, [state.status, shouldAutoDownload, runId]);
 
   async function startRun(args: SubmitArgs) {
     // Starting a new run dismisses any leftover cancelled banner.
     setCancelledSnapshot(null);
+    setShouldAutoDownload(!args.writeToAttio);
     let res: Response;
     if (args.mode === 'csv') {
       const fd = new FormData();
