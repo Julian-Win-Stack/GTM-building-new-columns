@@ -13,8 +13,8 @@ Written once at pipeline start (before Stage 1) for every CSV row:
 - `LinkedIn Page` is written as a **bare slug** (e.g. `playstation-sony`), not a URL. Attio's `linkedin` attribute is a validated handle field that rejects `www.`, `/showcase/` paths, and trailing slashes with `"LinkedIn handle is not valid"`. The pipeline extracts the slug from any CSV-supplied URL via `linkedInSlugForAttio()`; the original URL is still passed to Apify for Stage 10 (Number of SREs). Skipped silently when the slug can't be extracted.
 - `Apollo ID` comes from CSV column `Apollo Account Id` (slug: `apollo_id`). Skipped silently when the CSV cell is empty; companies without it are still enriched.
 - Skip rows with neither a Domain nor a LinkedIn URL entirely.
-- CSV rows with only a LinkedIn URL are resolved via Attio cache to obtain a domain; the row won't participate in domain-keyed stages until a future run after Attio assigns a domain.
-- `Account Purpose` is written via `--account-purpose <value>` CLI flag (always overwrites). Only CSV-sourced rows receive it — Attio-only carry-over records are not tagged.
+- Rows missing a Website are skipped at preflight — every CSV row needs **both** a Website and a LinkedIn URL to be processed. There is no LinkedIn-only resolution path; a missing Website cannot be back-filled from Attio.
+- `Account Purpose` is written via `--account-purpose <value>` CLI flag (always overwrites) for every CSV row in the run.
 
 ---
 

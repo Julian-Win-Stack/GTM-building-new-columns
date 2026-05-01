@@ -136,27 +136,31 @@ app.post('/api/runs', upload.single('csv'), async (req: Request, res: Response):
 
   // Detect resumable snapshot. We parse the CSV here (cheap — a few KB) and compare its
   // domain set to every saved snapshot. Match → return resumable info; no run starts yet.
+  // When writeToAttio is on, skip this entirely: the pipeline's Attio prefetch already
+  // resumes by skipping rows whose target columns are populated, mirroring CLI behavior.
   let resumable: { snapshotId: string; stagesCompleted: number; completedStageNames: string[]; savedAt: number; writeToAttio: boolean } | null = null;
-  try {
-    const rows = await readInputCsv(csvPath);
-    const domains: string[] = [];
-    for (const row of rows) {
-      const domain = deriveDomain(row['Website'] ?? '');
-      if (domain) domains.push(domain);
+  if (!writeToAttio) {
+    try {
+      const rows = await readInputCsv(csvPath);
+      const domains: string[] = [];
+      for (const row of rows) {
+        const domain = deriveDomain(row['Website'] ?? '');
+        if (domain) domains.push(domain);
+      }
+      const snap = await findResumableSnapshot(domains);
+      if (snap) {
+        resumable = {
+          snapshotId: snap.runId,
+          stagesCompleted: snap.stagesCompleted,
+          completedStageNames: snap.completedStageNames,
+          savedAt: snap.savedAt,
+          writeToAttio: snap.writeToAttio,
+        };
+      }
+    } catch (err) {
+      // CSV parse failure is surfaced when the run actually starts; don't block resume detection.
+      console.warn(`[runs] resume detection skipped (csv parse failed): ${err instanceof Error ? err.message : String(err)}`);
     }
-    const snap = await findResumableSnapshot(domains);
-    if (snap) {
-      resumable = {
-        snapshotId: snap.runId,
-        stagesCompleted: snap.stagesCompleted,
-        completedStageNames: snap.completedStageNames,
-        savedAt: snap.savedAt,
-        writeToAttio: snap.writeToAttio,
-      };
-    }
-  } catch (err) {
-    // CSV parse failure is surfaced when the run actually starts; don't block resume detection.
-    console.warn(`[runs] resume detection skipped (csv parse failed): ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const runId = randomUUID();
@@ -299,20 +303,24 @@ app.post('/api/runs/manual', async (req: Request, res: Response): Promise<void> 
 
   // Match the single derived domain against saved snapshots. Same flow as the CSV path:
   // a hit returns resumable info and stashes the upload for /resume or /start to pick up.
+  // When writeToAttio is on, skip this entirely — Attio prefetch handles resume natively
+  // by skipping populated columns, just like the CLI.
   let resumable: { snapshotId: string; stagesCompleted: number; completedStageNames: string[]; savedAt: number; writeToAttio: boolean } | null = null;
-  try {
-    const snap = await findResumableSnapshot([derived]);
-    if (snap) {
-      resumable = {
-        snapshotId: snap.runId,
-        stagesCompleted: snap.stagesCompleted,
-        completedStageNames: snap.completedStageNames,
-        savedAt: snap.savedAt,
-        writeToAttio: snap.writeToAttio,
-      };
+  if (!writeToAttio) {
+    try {
+      const snap = await findResumableSnapshot([derived]);
+      if (snap) {
+        resumable = {
+          snapshotId: snap.runId,
+          stagesCompleted: snap.stagesCompleted,
+          completedStageNames: snap.completedStageNames,
+          savedAt: snap.savedAt,
+          writeToAttio: snap.writeToAttio,
+        };
+      }
+    } catch (err) {
+      console.warn(`[runs/manual] resume detection skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
-  } catch (err) {
-    console.warn(`[runs/manual] resume detection skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const runId = randomUUID();
@@ -328,6 +336,15 @@ app.post('/api/runs/manual', async (req: Request, res: Response): Promise<void> 
   startRunAsync({ runId, csvPath, accountPurpose, writeToAttio });
 });
 
+// The resume banner exposes a "Push to Attio" toggle: if the user flips it before picking
+// Resume / Start fresh, the kickoff endpoint accepts a writeToAttio override and we update
+// the run record so the snapshot flusher persists the new flag.
+function resolveWriteToAttioOverride(raw: unknown, fallback: boolean): boolean {
+  if (raw === true || raw === 'true') return true;
+  if (raw === false || raw === 'false') return false;
+  return fallback;
+}
+
 app.post('/api/runs/:id/start', async (req: Request, res: Response): Promise<void> => {
   const id = req.params.id ?? '';
   const pending = pendingUploads.get(id);
@@ -335,9 +352,17 @@ app.post('/api/runs/:id/start', async (req: Request, res: Response): Promise<voi
     res.status(404).json({ error: 'no pending upload for this run id (already started or unknown)' });
     return;
   }
+  const writeToAttio = resolveWriteToAttioOverride(req.body?.writeToAttio, pending.writeToAttio);
   pendingUploads.delete(id);
+  const run = getRun(id);
+  if (run) run.writeToAttio = writeToAttio;
   res.json({ ok: true });
-  startRunAsync({ runId: id, ...pending });
+  startRunAsync({
+    runId: id,
+    csvPath: pending.csvPath,
+    accountPurpose: pending.accountPurpose,
+    writeToAttio,
+  });
 });
 
 app.post('/api/runs/:id/resume', async (req: Request, res: Response): Promise<void> => {
@@ -357,7 +382,10 @@ app.post('/api/runs/:id/resume', async (req: Request, res: Response): Promise<vo
     res.status(404).json({ error: 'snapshot not found (it may have been deleted by the TTL sweep)' });
     return;
   }
+  const writeToAttio = resolveWriteToAttioOverride(req.body?.writeToAttio, pending.writeToAttio);
   pendingUploads.delete(id);
+  const run = getRun(id);
+  if (run) run.writeToAttio = writeToAttio;
   const resumeCache = new Map<string, Record<string, string>>();
   for (const [domain, values] of Object.entries(snap.cache)) {
     resumeCache.set(domain, values);
@@ -367,7 +395,7 @@ app.post('/api/runs/:id/resume', async (req: Request, res: Response): Promise<vo
     runId: id,
     csvPath: pending.csvPath,
     accountPurpose: pending.accountPurpose ?? snap.accountPurpose,
-    writeToAttio: pending.writeToAttio,
+    writeToAttio,
     resumeCache,
     resumeFromSnapshotId: snap.runId,
   });

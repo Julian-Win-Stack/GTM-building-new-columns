@@ -25,11 +25,17 @@ export function App() {
   // Set when a run is started with writeToAttio=false: on successful completion the CSV is the
   // only output, so we trigger the download automatically. Cleared after firing (or on cancel).
   const [shouldAutoDownload, setShouldAutoDownload] = useState(false);
+  // Lifted out of ControlDeck so the toggle stays interactive while the resume banner is up:
+  // the user can switch between CSV-only and Attio modes before picking Resume / Start fresh.
+  const [writeToAttio, setWriteToAttio] = useState(false);
 
   const { state, cancel } = useRunStream(runId);
   const isRunning =
     state.status === 'starting' || state.status === 'running' || state.status === 'cancelling';
-  const blockControlDeck = isRunning || pending !== null;
+  // While the resume banner would otherwise block the form, flipping Attio ON dismisses
+  // the banner and unlocks the form: Attio prefetch handles resume natively, so the user
+  // just clicks Start enrichment again to fire a fresh Attio-mode run.
+  const blockControlDeck = isRunning || (pending !== null && !writeToAttio);
 
   // When the run finishes cancelling, snapshot the relevant info, then clear runId so
   // RunStatus + ActivityFeed unmount and the file input resets for the next upload.
@@ -39,6 +45,7 @@ export function App() {
       setRunId(null);
       setControlDeckKey((k) => k + 1);
       setShouldAutoDownload(false);
+      setWriteToAttio(false);
     }
   }, [state.status, state.stagesCompleted, runId]);
 
@@ -54,13 +61,13 @@ export function App() {
   async function startRun(args: SubmitArgs) {
     // Starting a new run dismisses any leftover cancelled banner.
     setCancelledSnapshot(null);
-    setShouldAutoDownload(!args.writeToAttio);
+    setShouldAutoDownload(!writeToAttio);
     let res: Response;
     if (args.mode === 'csv') {
       const fd = new FormData();
       fd.append('csv', args.file);
       if (args.accountPurpose) fd.append('accountPurpose', args.accountPurpose);
-      fd.append('writeToAttio', String(args.writeToAttio));
+      fd.append('writeToAttio', String(writeToAttio));
       res = await fetch('/api/runs', { method: 'POST', body: fd });
     } else {
       res = await fetch('/api/runs/manual', {
@@ -72,7 +79,7 @@ export function App() {
           linkedinUrl: args.manual.linkedinUrl,
           description: args.manual.description,
           accountPurpose: args.accountPurpose,
-          writeToAttio: args.writeToAttio,
+          writeToAttio,
         }),
       });
     }
@@ -86,17 +93,22 @@ export function App() {
       setPending({ runId: body.runId, resumable: body.resumable });
       return;
     }
+    setPending(null);
     setRunId(body.runId);
   }
 
   async function chooseResume() {
     if (!pending) return;
     setResumeBusy(true);
+    setShouldAutoDownload(!writeToAttio);
     try {
       const res = await fetch(`/api/runs/${pending.runId}/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ snapshotId: pending.resumable.snapshotId }),
+        body: JSON.stringify({
+          snapshotId: pending.resumable.snapshotId,
+          writeToAttio,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -115,8 +127,13 @@ export function App() {
   async function chooseStartFresh() {
     if (!pending) return;
     setResumeBusy(true);
+    setShouldAutoDownload(!writeToAttio);
     try {
-      const res = await fetch(`/api/runs/${pending.runId}/start`, { method: 'POST' });
+      const res = await fetch(`/api/runs/${pending.runId}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ writeToAttio }),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         alert(body.error ?? `Server returned ${res.status}`);
@@ -157,10 +174,18 @@ export function App() {
       </header>
 
       <main className="app__main">
-        <ControlDeck key={controlDeckKey} disabled={blockControlDeck} onSubmit={startRun} />
-        {pending && (
+        <ControlDeck
+          key={controlDeckKey}
+          disabled={blockControlDeck}
+          toggleLocked={isRunning}
+          writeToAttio={writeToAttio}
+          onWriteToAttioChange={setWriteToAttio}
+          onSubmit={startRun}
+        />
+        {pending && !writeToAttio && (
           <ResumeBanner
             info={pending.resumable}
+            currentWriteToAttio={writeToAttio}
             onResume={chooseResume}
             onStartFresh={chooseStartFresh}
             busy={resumeBusy}

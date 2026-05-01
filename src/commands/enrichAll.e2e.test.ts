@@ -301,38 +301,6 @@ afterAll(async () => {
 // Group 1 — Input routing
 // ---------------------------------------------------------------------------
 describe('input routing', () => {
-  it('resolves LinkedIn-only CSV row domain via Attio cache and runs the pipeline', async () => {
-    const csvPath = await makeCsv(tmpDir, [
-      {
-        'Company Name': 'Acme',
-        Website: '',
-        'Company Linkedin Url': 'https://linkedin.com/company/acme',
-        'Short Description': '',
-      },
-    ]);
-    // Attio already has a record for acme.com linked to this LinkedIn URL
-    m.fetchAllRecords.mockResolvedValue(
-      new Map([
-        [
-          'acme.com',
-          {
-            [S('LinkedIn Page')]: 'https://linkedin.com/company/acme',
-            [S('Company Name')]: 'Acme',
-            [S('Domain')]: 'acme.com',
-          },
-        ],
-      ])
-    );
-    defaultExaMocks(['acme.com']);
-
-    await enrichAll({ csv: csvPath, skipConfirm: true });
-
-    // Domain resolved → Stage 2 (digitalNative) called for acme.com
-    expect(m.digitalNativeExaSearch).toHaveBeenCalled();
-    const [[domains]] = m.digitalNativeExaSearch.mock.calls as [[string[]]];
-    expect(domains).toContain('acme.com');
-  });
-
   it('skips a LinkedIn-only row with no website at preflight — no Attio writes, no stage calls', async () => {
     const csvPath = await makeCsv(tmpDir, [
       {
@@ -452,45 +420,73 @@ describe('input routing', () => {
     }
   });
 
-  it('does not write Account Purpose to Attio-only records even when --account-purpose is set', async () => {
-    // No CSV rows — the only company in the pipeline is an Attio-only carry-over.
-    const csvPath = await makeCsv(tmpDir, []);
-    m.fetchAllRecords.mockResolvedValue(
-      new Map([['attio-only.com', { [S('Company Name')]: 'Carry Co', [S('Domain')]: 'attio-only.com' }]])
-    );
-    defaultExaMocks(['attio-only.com']);
-
-    await enrichAll({ csv: csvPath, accountPurpose: 'Q1 ABM', skipConfirm: true });
-
-    // No identity write fires for Attio-only records; Account Purpose must not appear.
-    for (const [callArg] of m.upsertByDomain.mock.calls as [Record<string, unknown>][]) {
-      expect(callArg['Account Purpose']).toBeUndefined();
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
-// Group 3 — CSV ∪ Attio merge
+// Group 3 — Scope: CSV-only (Attio records outside the CSV are ignored)
 // ---------------------------------------------------------------------------
-describe('csv-attio merge', () => {
-  it('includes Attio-only record (no Reason for Rejection) in the pipeline', async () => {
-    // CSV has no rows — pipeline set comes entirely from Attio
-    const csvPath = await makeCsv(tmpDir, []);
+describe('scope: CSV-only', () => {
+  it('does not enrich Attio records whose domain is not in the CSV', async () => {
+    // CSV has acme.com only. Attio additionally has stranger.com (no Reason for Rejection,
+    // empty stage columns) — under the old union rule it would be picked up; under the
+    // current rule it must be ignored entirely.
+    const csvPath = await makeCsv(tmpDir, [
+      {
+        'Company Name': 'Acme',
+        Website: 'acme.com',
+        'Company Linkedin Url': 'https://linkedin.com/company/acme',
+        'Short Description': 'SaaS platform',
+      },
+    ]);
     m.fetchAllRecords.mockResolvedValue(
       new Map([
         [
-          'attio-only.com',
-          { [S('Company Name')]: 'Attio Only Co', [S('Domain')]: 'attio-only.com' },
+          'stranger.com',
+          { [S('Company Name')]: 'Stranger Co', [S('Domain')]: 'stranger.com' },
         ],
       ])
     );
-    defaultExaMocks(['attio-only.com']);
+    defaultExaMocks(['acme.com']);
 
     await enrichAll({ csv: csvPath, skipConfirm: true });
 
-    expect(m.digitalNativeExaSearch).toHaveBeenCalled();
-    const [[domains]] = m.digitalNativeExaSearch.mock.calls as [[string[]]];
-    expect(domains).toContain('attio-only.com');
+    // Stage 2 (digitalNative) must have been called only for acme.com — never for stranger.com.
+    const allDigitalNativeDomains = m.digitalNativeExaSearch.mock.calls.flatMap(
+      (c: unknown[]) => (c[0] as string[]) ?? []
+    ) as string[];
+    expect(allDigitalNativeDomains).toContain('acme.com');
+    expect(allDigitalNativeDomains).not.toContain('stranger.com');
+
+    // No upsert (identity, stage column, or rejection) ever targets stranger.com.
+    const upsertedDomains = m.upsertByDomain.mock.calls.map(
+      (c: unknown[]) => (c[0] as Record<string, unknown>)?.['Domain']
+    );
+    expect(upsertedDomains).not.toContain('stranger.com');
+  });
+
+  it('passes only CSV domains to fetchAllRecords (narrows the prefetch)', async () => {
+    const csvPath = await makeCsv(tmpDir, [
+      {
+        'Company Name': 'Acme',
+        Website: 'acme.com',
+        'Company Linkedin Url': 'https://linkedin.com/company/acme',
+        'Short Description': '',
+      },
+      {
+        'Company Name': 'Beta',
+        Website: 'beta.com',
+        'Company Linkedin Url': 'https://linkedin.com/company/beta',
+        'Short Description': '',
+      },
+    ]);
+    defaultExaMocks(['acme.com', 'beta.com']);
+
+    await enrichAll({ csv: csvPath, skipConfirm: true });
+
+    expect(m.fetchAllRecords).toHaveBeenCalledTimes(1);
+    const [domainsArg] = m.fetchAllRecords.mock.calls[0] as [string[]];
+    expect(domainsArg).toEqual(expect.arrayContaining(['acme.com', 'beta.com']));
+    expect(domainsArg).toHaveLength(2);
   });
 });
 

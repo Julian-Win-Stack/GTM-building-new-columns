@@ -230,6 +230,35 @@ describe('fetchAllRecords', () => {
 
     expect(map.size).toBe(2);
   });
+
+  it('pushes a $or domain filter into the query body when called with a domain list', async () => {
+    httpMock.post.mockResolvedValue({ data: { data: [makeRecord('acme.com')] } });
+
+    await fetchAllRecords(['acme.com', 'beta.com'], httpMock);
+
+    const [, body] = httpMock.post.mock.calls[0]!;
+    expect(body).toEqual({
+      limit: 500,
+      offset: 0,
+      filter: { $or: [{ [DOMAIN_SLUG]: 'acme.com' }, { [DOMAIN_SLUG]: 'beta.com' }] },
+    });
+  });
+
+  it('omits the filter clause when called with no domain list', async () => {
+    httpMock.post.mockResolvedValue({ data: { data: [] } });
+
+    await fetchAllRecords(undefined, httpMock);
+
+    const [, body] = httpMock.post.mock.calls[0]!;
+    expect(body).toEqual({ limit: 500, offset: 0 });
+  });
+
+  it('short-circuits and makes no request when called with an empty domain list', async () => {
+    const map = await fetchAllRecords([], httpMock);
+
+    expect(httpMock.post).not.toHaveBeenCalled();
+    expect(map.size).toBe(0);
+  });
 });
 
 describe('upsertCompanyByDomain', () => {

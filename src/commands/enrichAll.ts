@@ -266,11 +266,15 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     }
     console.log(`[enrich-all] resumed from snapshot (${attioCache.size} cached records)`);
   } else if (writeToAttio) {
-    console.log(`[enrich-all] pre-fetching Attio records…`);
+    // Scope: only the input CSV's domains. Attio records for companies NOT in this CSV are
+    // intentionally ignored — we do not enrich, write to, or even read them. This matches the
+    // user-facing rule: "the program focuses on the input companies, not the whole Attio table".
+    const csvDomainsForPrefetch = companies.map((c) => c.domain);
+    console.log(`[enrich-all] pre-fetching Attio records for ${csvDomainsForPrefetch.length} CSV domains…`);
     try {
-      const prefetch = fetchAllRecords();
+      const prefetch = fetchAllRecords(csvDomainsForPrefetch);
       attioCache = await (ctx.cancelSignal ? Promise.race([prefetch, ctx.cancelSignal]) : prefetch);
-      console.log(`[enrich-all] attio cache loaded (${attioCache.size} records found)`);
+      console.log(`[enrich-all] attio cache loaded (${attioCache.size} records matched out of ${csvDomainsForPrefetch.length} CSV domains)`);
     } catch (err) {
       if (ctx.isCancelled?.()) {
         console.log(`[enrich-all] prefetch aborted (cancelled)`);
@@ -285,7 +289,6 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   // Hand the live cache reference to the caller so an external flusher can snapshot it mid-run.
   opts.onCacheReady?.(attioCache);
 
-  const reasonSlug = FIELD_SLUGS['Reason for Rejection']!;
   const nameSlug = FIELD_SLUGS['Company Name']!;
   const linkedinSlug = FIELD_SLUGS['LinkedIn Page']!;
   const domainSlug = FIELD_SLUGS['Domain']!;
@@ -294,25 +297,11 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   const apolloIdSlug = FIELD_SLUGS['Apollo ID']!;
   const accountPurposeSlug = FIELD_SLUGS['Account Purpose']!;
 
-  // Merge non-rejected Attio records into the processing set (CSV ∪ non-rejected Attio).
-  // Only relevant when writeToAttio=true (otherwise attioCache is empty).
-  const csvDomainSet = new Set(companies.map((c) => c.domain));
-  let attioOnlyIncluded = 0;
-  let attioOnlyRejected = 0;
-  for (const [domain, values] of attioCache) {
-    if (csvDomainSet.has(domain)) continue;
-    if (values[reasonSlug]) {
-      attioOnlyRejected++;
-      continue;
-    }
-    const name = values[nameSlug] || domain;
-    companies.push({ companyName: name, domain });
-    attioOnlyIncluded++;
-    const li = values[linkedinSlug];
-    if (li && !linkedinByDomain.has(domain)) linkedinByDomain.set(domain, li);
-  }
+  // Processing set = CSV companies only. Attio records for companies outside the CSV are
+  // never enriched, even if they are partially populated or have empty columns. To re-enrich
+  // such a company, include it in the CSV.
   console.log(
-    `[enrich-all] csv=${csvPath} rows=${subset.length} csvCompanies=${csvIdentities.length} badRows=${skippedBadDomain} totalCompanies=${companies.length} (attio-only-included=${attioOnlyIncluded} attio-only-rejected-skipped=${attioOnlyRejected})`
+    `[enrich-all] csv=${csvPath} rows=${subset.length} csvCompanies=${csvIdentities.length} badRows=${skippedBadDomain} totalCompanies=${companies.length}`
   );
 
   // Compute the identity-write payload for each CSV row using the ORIGINAL cache state

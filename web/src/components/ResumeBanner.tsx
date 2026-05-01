@@ -10,6 +10,7 @@ export type ResumableInfo = {
 
 type Props = {
   info: ResumableInfo;
+  currentWriteToAttio: boolean;
   onResume: () => void;
   onStartFresh: () => void;
   busy: boolean;
@@ -17,7 +18,7 @@ type Props = {
 
 const TOTAL_STAGES = 21;
 
-export function ResumeBanner({ info, onResume, onStartFresh, busy }: Props) {
+export function ResumeBanner({ info, currentWriteToAttio, onResume, onStartFresh, busy }: Props) {
   const lastStage =
     info.completedStageNames.length > 0
       ? info.completedStageNames[info.completedStageNames.length - 1]
@@ -26,20 +27,20 @@ export function ResumeBanner({ info, onResume, onStartFresh, busy }: Props) {
     <section className="resume-banner">
       <div className="resume-banner__head">
         <span className="resume-banner__pulse" />
-        <span className="resume-banner__title">We picked up where the last run left off</span>
+        <span className="resume-banner__title">A saved draft from this set is on disk</span>
       </div>
       <div className="resume-banner__detail">
-        Stage {info.stagesCompleted} of {TOTAL_STAGES} complete · last finished: <span className="resume-banner__stage">{lastStage}</span>
+        Local snapshot: Stage {info.stagesCompleted} of {TOTAL_STAGES} · last finished: <span className="resume-banner__stage">{lastStage}</span>
         <span className="resume-banner__sep">·</span>
-        auto-saved {formatRelative(info.savedAt)} ago
+        saved {formatRelative(info.savedAt)} ago
       </div>
       <div className="resume-banner__actions">
         <button type="button" className="btn-ghost" onClick={onStartFresh} disabled={busy}>
           <span className="btn-ghost__dot" />
-          <span>Start fresh</span>
+          <span>{currentWriteToAttio ? 'Use Attio as the source' : 'Start fresh'}</span>
         </button>
         <button type="button" className="btn-secondary" onClick={onResume} disabled={busy}>
-          <span>Resume from Stage {Math.min(info.stagesCompleted + 1, TOTAL_STAGES)}</span>
+          <span>Resume from snapshot (Stage {Math.min(info.stagesCompleted + 1, TOTAL_STAGES)})</span>
           <span className="btn-secondary__arrow">→</span>
         </button>
       </div>

@@ -11,15 +11,27 @@ export type ManualCompany = {
 };
 
 export type SubmitArgs =
-  | { mode: 'csv'; file: File; accountPurpose: string; writeToAttio: boolean }
-  | { mode: 'manual'; manual: ManualCompany; accountPurpose: string; writeToAttio: boolean };
+  | { mode: 'csv'; file: File; accountPurpose: string }
+  | { mode: 'manual'; manual: ManualCompany; accountPurpose: string };
 
 type Props = {
   disabled: boolean;
+  // Locks the writeToAttio toggle. Kept separate from `disabled` so the toggle stays
+  // interactive while the resume banner is showing — the user can switch modes before
+  // picking Resume or Start fresh.
+  toggleLocked: boolean;
+  writeToAttio: boolean;
+  onWriteToAttioChange: (next: boolean) => void;
   onSubmit: (args: SubmitArgs) => Promise<void> | void;
 };
 
-export function ControlDeck({ disabled, onSubmit }: Props) {
+export function ControlDeck({
+  disabled,
+  toggleLocked,
+  writeToAttio,
+  onWriteToAttioChange,
+  onSubmit,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<RunMode>('csv');
   const [file, setFile] = useState<File | null>(null);
@@ -30,7 +42,6 @@ export function ControlDeck({ disabled, onSubmit }: Props) {
     description: '',
   });
   const [accountPurpose, setAccountPurpose] = useState('');
-  const [writeToAttio, setWriteToAttio] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -50,7 +61,7 @@ export function ControlDeck({ disabled, onSubmit }: Props) {
     if (disabled) return;
     if (mode === 'csv') {
       if (!file) return;
-      await onSubmit({ mode: 'csv', file, accountPurpose, writeToAttio });
+      await onSubmit({ mode: 'csv', file, accountPurpose });
     } else {
       if (!manualValid) return;
       await onSubmit({
@@ -62,7 +73,6 @@ export function ControlDeck({ disabled, onSubmit }: Props) {
           description: manual.description.trim(),
         },
         accountPurpose,
-        writeToAttio,
       });
     }
   }
@@ -173,21 +183,21 @@ export function ControlDeck({ disabled, onSubmit }: Props) {
               role="switch"
               aria-checked={writeToAttio}
               className={`toggle ${writeToAttio ? 'toggle--on' : ''}`}
-              onClick={() => setWriteToAttio((v) => !v)}
-              disabled={disabled}
+              onClick={() => onWriteToAttioChange(!writeToAttio)}
+              disabled={toggleLocked}
             >
               <span className="toggle__track" />
               <span className="toggle__thumb" />
             </button>
             <span className="ctrl__hint">
               {writeToAttio
-                ? 'Each enriched cell will upsert into Attio in real time.'
+                ? 'Each enriched cell upserts into Attio in real time. Columns already populated on the matching Attio record are skipped, so previously enriched companies pick up where they left off.'
                 : 'CSV-only run. Nothing is written to Attio.'}
             </span>
             {!writeToAttio && (
               <span className="ctrl__hint ctrl__hint--reassure">
                 <span className="ctrl__hint-mark" aria-hidden>◆</span>
-                Auto-saved every second on disk. If the server restarts, re-upload the same CSV to resume where you left off. Drafts kept for 7 days.
+                Only interrupted runs are saved. If you cancel or the server restarts, re-upload the same CSV within 7 days to resume — successful runs aren't stored.
               </span>
             )}
           </label>
@@ -279,15 +289,15 @@ export function ControlDeck({ disabled, onSubmit }: Props) {
                 role="switch"
                 aria-checked={writeToAttio}
                 className={`toggle ${writeToAttio ? 'toggle--on' : ''}`}
-                onClick={() => setWriteToAttio((v) => !v)}
-                disabled={disabled}
+                onClick={() => onWriteToAttioChange(!writeToAttio)}
+                disabled={toggleLocked}
               >
                 <span className="toggle__track" />
                 <span className="toggle__thumb" />
               </button>
               <span className="ctrl__hint">
                 {writeToAttio
-                  ? 'The enriched company will upsert into Attio in real time.'
+                  ? 'The enriched company upserts into Attio in real time. Columns already populated on the matching Attio record are skipped, so a re-run only fills in what is missing.'
                   : 'In-app only. Nothing is written to Attio.'}
               </span>
             </label>

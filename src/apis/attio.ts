@@ -86,13 +86,26 @@ export async function fetchAllRecords(
   domains?: string[] | null,
   client: { post: typeof http.post } = http
 ): Promise<Map<string, Record<string, string>>> {
+  // Empty list means "zero records wanted" — skip the round-trip.
+  if (domains && domains.length === 0) return new Map();
+
   const domainSet = domains ? new Set(domains) : null;
   const map = new Map<string, Record<string, string>>();
   let offset = 0;
   const limit = 500;
 
+  // Push the domain restriction into the query body so Attio returns only matching records,
+  // not the entire `companies` table. Attio's Domain attribute filter doesn't support $in, so
+  // multiple values must be combined with $or. The implicit shorthand `{ "<slug>": "<value>" }`
+  // does an equality check on the Domain attribute's `domain` property.
+  const filter = domains
+    ? { $or: domains.map((d) => ({ [DOMAIN_SLUG]: d })) }
+    : undefined;
+
   while (true) {
-    const res = await client.post(`/objects/${ATTIO_OBJECT_SLUG}/records/query`, { limit, offset });
+    const body: Record<string, unknown> = { limit, offset };
+    if (filter) body.filter = filter;
+    const res = await client.post(`/objects/${ATTIO_OBJECT_SLUG}/records/query`, body);
     const records = (res.data?.data ?? []) as RawAttioRecord[];
     if (records.length === 0) break;
 

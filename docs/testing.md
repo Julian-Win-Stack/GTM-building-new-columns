@@ -5,7 +5,7 @@
 **Unit tests are the primary layer.** One `*.test.ts` alongside each module (e.g. `src/util.ts` → `src/util.test.ts`). Cover: parsers, formatters, gates, helpers, `runStage` retry/backoff, `filterSurvivors`, `writeStageColumn`, Attio HTTP shape.
 
 **Integration / E2E tests** live in `src/commands/enrichAll.e2e.test.ts` (helpers in `enrichAll.e2e.helpers.ts`). Drive the full pipeline with module-mocked external APIs. **Scope is intentionally narrow** — cover ONLY orchestration logic inline in `enrichAll.ts` that unit tests cannot reach:
-- CSV ∪ Attio merge
+- CSV-only scope (Attio records outside the CSV are ignored; prefetch is narrowed to CSV domains)
 - Identity-write no-overwrite
 - Stage 3's hand-rolled conditional gate
 - Stage 10 N/A branch

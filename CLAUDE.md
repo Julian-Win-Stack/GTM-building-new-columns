@@ -108,7 +108,7 @@ railway.json                  — Railway deploy config: nixpacks build, npm sta
 
 ## Stage-wise pipeline (enrich-all)
 
-Flow: load CSV → pre-fetch ALL Attio records → merge processing set (CSV ∪ non-rejected Attio records) → Stage 1 → write → filter survivors → Stage 2 → … → write final results. Resume semantics: any company whose target column is already populated is skipped for that stage.
+Flow: load CSV → pre-fetch Attio records **only for CSV domains** → Stage 1 → write → filter survivors → Stage 2 → … → write final results. Processing set = CSV companies only; Attio records for companies outside the CSV are never enriched (even partially-populated ones). Resume semantics: any CSV company whose target column is already populated in Attio is skipped for that stage.
 
 ### Stage order and gates
 
@@ -182,8 +182,9 @@ npm test                                # vitest
 - The UI's POST /api/runs takes a multipart CSV plus `accountPurpose` (string, optional) and `writeToAttio` (boolean, defaults to `false` from the UI). The server saves the CSV to `UPLOAD_DIR/<uuid>` (persistent volume on Railway), then either:
   - **No resumable snapshot found** → returns `{ runId }` and kicks off `enrichAll` immediately.
   - **Resumable snapshot found** → returns `{ runId, resumable: { snapshotId, stagesCompleted, … } }` *without* starting the run. The client then calls POST `/api/runs/:id/resume` (with the snapshotId) or POST `/api/runs/:id/start` (fresh). Both kick off `enrichAll` with the same params, the former passing `resumeCache` populated from the snapshot.
-- POST /api/runs/manual takes JSON `{ companyName, website, linkedinUrl, description?, accountPurpose?, writeToAttio }`. Required fields are companyName/website/linkedinUrl; description is optional but recommended for scoring accuracy. The server materializes a one-row CSV (with `Apollo Account Id` empty) at `UPLOAD_DIR/manual-<uuid>.csv` and reuses `startRunAsync` — same pipeline, same events, same download. Resume detection mirrors the CSV path: the derived domain (set-equality on `{derivedDomain}`) is matched against saved snapshots; a hit returns `{ runId, resumable }` and waits for `/resume` or `/start`.
-- `enrichAll` accepts a `RunCtx { writeToAttio, emit, isCancelled, cancelSignal }`. Every Attio write site (`writeStageColumn`, `writeRejectionReasons`, score-stage `upsertCompanyByDomain` calls, identity-write block, the upfront `fetchAllRecords` prefetch) checks `ctx.writeToAttio` before hitting the network. Cache mutations and event emits happen regardless. Cancel races every API await against `cancelSignal` so in-flight HTTP calls stop blocking the pipeline.
+  - **Snapshot resume is bypassed when `writeToAttio` is true.** Attio-sync runs always start immediately and rely on the pipeline's Attio prefetch to skip rows whose target columns are already populated (matches CLI semantics).
+- POST /api/runs/manual takes JSON `{ companyName, website, linkedinUrl, description?, accountPurpose?, writeToAttio }`. Required fields are companyName/website/linkedinUrl; description is optional but recommended for scoring accuracy. The server materializes a one-row CSV (with `Apollo Account Id` empty) at `UPLOAD_DIR/manual-<uuid>.csv` and reuses `startRunAsync` — same pipeline, same events, same download. Resume detection mirrors the CSV path: the derived domain (set-equality on `{derivedDomain}`) is matched against saved snapshots; a hit returns `{ runId, resumable }` and waits for `/resume` or `/start`. Same `writeToAttio=true` bypass applies.
+- `enrichAll` accepts a `RunCtx { writeToAttio, emit, isCancelled, cancelSignal }`. Every Attio write site (`writeStageColumn`, `writeRejectionReasons`, score-stage `upsertCompanyByDomain` calls, identity-write block, the upfront `fetchAllRecords` prefetch) checks `ctx.writeToAttio` before hitting the network. The prefetch is also narrowed to the CSV's domains so Attio records outside the CSV never enter the cache. Cache mutations and event emits happen regardless. Cancel races every API await against `cancelSignal` so in-flight HTTP calls stop blocking the pipeline.
 - After cache initialization (Attio prefetch / `resumeCache` / empty), `enrichAll` walks `attioCache` and emits a `cell-updated` event for every non-empty cell so the activity feed fully rehydrates from frame one — applies to both Attio resumes and snapshot resumes.
 - Pipeline events are consumed server-side: each `RunEvent` updates the run's `RunRecord` (current stage, ring buffer of recent activity, terminal counts). The frontend polls `GET /api/runs/:id/state` every second; the server returns a `RunStateSnapshot` with `Cache-Control: no-store`. The polling hook stops on terminal status (`completed` / `cancelled` / `failed`).
 - The downloadable CSV (`GET /api/runs/:id/csv`) is served from the in-memory `attioCache`, ordered by `CSV_COLUMN_ORDER` (see `server/columns.ts`).
@@ -224,12 +225,16 @@ Unit tests are the primary layer — one `*.test.ts` alongside each module. E2E 
 
 See `docs/testing.md` for full rules, scope boundaries, and the commit workflow.
 
+## Clarifying Questions
+When the prompt is vague and you are unsure, ask before building. Wrong work in this repo costs API credits, Attio writes against real customer data, and review cycles — a clarifying question is always cheaper. Always ask when: scope is unclear (which stage, which column, which API), the user references something ambiguously ("the score thing", "fix the gate"), key inputs are missing (column name, gate condition, target value format), or a business-logic decision is required (gate thresholds, scoring weights, what counts as a survivor, column semantics). Do not ask for trivial implementation choices that the existing code style already answers. Bundle multiple questions into one message; offer 2–3 likely interpretations as multiple choice when you can. If you realize mid-execution that you are unsure, stop and ask — do not pick a "reasonable default" for anything that touches enrichment behavior, gating, scoring, or Attio writes.
+
 ## Rules
 - Never commit `.env` — only `.env.example`
 - All secrets in `.env`, read via `KEYS` in `config.ts`
 - The Attio object slug (`companies`) is hardcoded as `ATTIO_OBJECT_SLUG` in `src/apis/attio.ts` — not env-driven, since the slug names in `FIELD_SLUGS` are tightly coupled to that specific object's schema
 - Adding a new enrichable column requires changes in 4 places: `types.ts`, `config.ts`, `enrichers/index.ts`, `attio.ts:FIELD_SLUGS` — see `docs/adding-columns.md` for full checklist including score columns and circular dependency exclusions
 - Never make business logic decisions without asking the user first
+- When the prompt is vague or you are unsure what the user wants, ask before building (see Clarifying Questions section above)
 - `toAttioValues` skips empty strings — enrichers must return `''` not `null`/`undefined`
 
 ## Detailed docs

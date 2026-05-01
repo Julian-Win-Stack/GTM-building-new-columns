@@ -120,7 +120,7 @@ The web UI gives non-technical users a forgiving path through the same pipeline:
 
 ### Input set
 
-The processing set is **CSV rows ∪ non-rejected Attio records** (when Attio sync is on). Re-running after adding rows to the CSV will also re-process carry-over Attio companies for any stages they haven't completed yet. With Attio sync off, only the CSV is processed.
+The processing set is **always the CSV (or single-company input) only.** With Attio sync on, the pipeline pre-fetches the matching Attio record for each CSV domain so it can skip stages whose target columns are already populated — but Attio records whose domain is *not* in the current CSV are ignored. Re-enriching an old company means re-including it in the CSV.
 
 ### 21-stage pipeline
 
