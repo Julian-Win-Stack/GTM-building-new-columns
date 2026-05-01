@@ -59,9 +59,14 @@ export function App() {
   }, [state.status, shouldAutoDownload, runId]);
 
   async function startRun(args: SubmitArgs) {
-    // Starting a new run dismisses any leftover cancelled banner.
+    // Starting a new run dismisses any leftover cancelled banner and clears any state from
+    // a previous run. Critical: clear runId + shouldAutoDownload BEFORE the fetch — otherwise
+    // a stale `state.status === 'completed'` from a finished prior run can satisfy the
+    // auto-download effect and trigger the wrong CSV download.
     setCancelledSnapshot(null);
-    setShouldAutoDownload(!writeToAttio);
+    setShouldAutoDownload(false);
+    setRunId(null);
+    setPending(null);
     let res: Response;
     if (args.mode === 'csv') {
       const fd = new FormData();
@@ -93,14 +98,13 @@ export function App() {
       setPending({ runId: body.runId, resumable: body.resumable });
       return;
     }
-    setPending(null);
     setRunId(body.runId);
+    setShouldAutoDownload(!writeToAttio);
   }
 
   async function chooseResume() {
     if (!pending) return;
     setResumeBusy(true);
-    setShouldAutoDownload(!writeToAttio);
     try {
       const res = await fetch(`/api/runs/${pending.runId}/resume`, {
         method: 'POST',
@@ -119,6 +123,7 @@ export function App() {
       const id = pending.runId;
       setPending(null);
       setRunId(id);
+      setShouldAutoDownload(!writeToAttio);
     } finally {
       setResumeBusy(false);
     }
@@ -127,7 +132,6 @@ export function App() {
   async function chooseStartFresh() {
     if (!pending) return;
     setResumeBusy(true);
-    setShouldAutoDownload(!writeToAttio);
     try {
       const res = await fetch(`/api/runs/${pending.runId}/start`, {
         method: 'POST',
@@ -143,6 +147,7 @@ export function App() {
       const id = pending.runId;
       setPending(null);
       setRunId(id);
+      setShouldAutoDownload(!writeToAttio);
     } finally {
       setResumeBusy(false);
     }
