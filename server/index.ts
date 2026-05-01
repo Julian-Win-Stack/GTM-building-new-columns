@@ -231,7 +231,9 @@ function validateManualField(
 }
 
 // Manual single-company run. Materializes a one-row CSV from JSON, then routes through the
-// same enrichAll pipeline. No resume detection — manual runs are short-lived and one-shot.
+// same enrichAll pipeline. Resume detection mirrors the CSV path: the derived domain set
+// ({derivedDomain}) is matched against saved snapshots, so re-submitting the same company
+// after a crash/cancel surfaces the resume banner.
 app.post('/api/runs/manual', async (req: Request, res: Response): Promise<void> => {
   const body = (req.body ?? {}) as Record<string, unknown>;
 
@@ -295,8 +297,33 @@ app.post('/api/runs/manual', async (req: Request, res: Response): Promise<void> 
   );
   await fs.writeFile(csvPath, csvText, 'utf8');
 
+  // Match the single derived domain against saved snapshots. Same flow as the CSV path:
+  // a hit returns resumable info and stashes the upload for /resume or /start to pick up.
+  let resumable: { snapshotId: string; stagesCompleted: number; completedStageNames: string[]; savedAt: number; writeToAttio: boolean } | null = null;
+  try {
+    const snap = await findResumableSnapshot([derived]);
+    if (snap) {
+      resumable = {
+        snapshotId: snap.runId,
+        stagesCompleted: snap.stagesCompleted,
+        completedStageNames: snap.completedStageNames,
+        savedAt: snap.savedAt,
+        writeToAttio: snap.writeToAttio,
+      };
+    }
+  } catch (err) {
+    console.warn(`[runs/manual] resume detection skipped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   const runId = randomUUID();
   createRun(runId, { writeToAttio, accountPurpose });
+
+  if (resumable) {
+    pendingUploads.set(runId, { csvPath, accountPurpose, writeToAttio });
+    res.json({ runId, resumable });
+    return;
+  }
+
   res.json({ runId });
   startRunAsync({ runId, csvPath, accountPurpose, writeToAttio });
 });

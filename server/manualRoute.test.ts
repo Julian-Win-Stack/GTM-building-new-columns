@@ -52,15 +52,25 @@ vi.mock('../src/commands/enrichAll.js', () => ({
 
 const { app } = await import('./index.js');
 const { getRun } = await import('./runRegistry.js');
+const { writeSnapshot, deleteSnapshot } = await import('./snapshotStore.js');
 
 const UPLOAD_DIR = '/tmp/manual-route-test/uploads';
+const SNAPSHOT_DIR = '/tmp/manual-route-test/runs';
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let server: Server;
 let baseUrl: string;
 
+async function clearSnapshots(): Promise<void> {
+  // Defensive: snapshot dir may carry leftovers from prior dev runs on the same machine.
+  // The manual route now reads snapshots, so a stray match would skew tests non-deterministically.
+  await fs.rm(SNAPSHOT_DIR, { recursive: true, force: true });
+  await fs.mkdir(SNAPSHOT_DIR, { recursive: true });
+}
+
 beforeAll(async () => {
   await fs.mkdir(UPLOAD_DIR, { recursive: true });
+  await clearSnapshots();
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
   });
@@ -511,6 +521,55 @@ describe('POST /api/runs/manual — concurrent calls', () => {
     expect(capture.paths.length).toBeGreaterThanOrEqual(5);
     const uniquePaths = new Set(capture.paths.slice(-5));
     expect(uniquePaths.size).toBe(5);
+  });
+});
+
+describe('POST /api/runs/manual — resume detection', () => {
+  afterEach(async () => {
+    await clearSnapshots();
+  });
+
+  it('returns resumable + does NOT call enrichAll when a snapshot matches the derived domain', async () => {
+    const snapshotRunId = '11111111-1111-4111-8111-111111111111';
+    await writeSnapshot({
+      version: 1,
+      runId: snapshotRunId,
+      savedAt: Date.now(),
+      domains: ['acme.com'],
+      writeToAttio: false,
+      stagesCompleted: 4,
+      completedStageNames: ['Stage 1', 'Stage 2', 'Stage 3', 'Stage 4'],
+      cache: { 'acme.com': { 'Competitor Tooling': 'Datadog' } },
+    });
+
+    const before = enrichAllMock.mock.calls.length;
+    const resp = await fetch(`${baseUrl}/api/runs/manual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(validBody),
+    });
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as {
+      runId?: string;
+      resumable?: { snapshotId: string; stagesCompleted: number; writeToAttio: boolean };
+    };
+    expect(body.runId).toMatch(UUID_V4_RE);
+    expect(body.resumable).toBeDefined();
+    expect(body.resumable!.snapshotId).toBe(snapshotRunId);
+    expect(body.resumable!.stagesCompleted).toBe(4);
+
+    // Give any erroneously-scheduled IIFE a tick to land before asserting it didn't.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(enrichAllMock.mock.calls.length).toBe(before);
+
+    await deleteSnapshot(snapshotRunId);
+  });
+
+  it('starts immediately when no snapshot matches the derived domain', async () => {
+    const { status, json } = await postManual(validBody);
+    expect(status).toBe(200);
+    expect((json as { resumable?: unknown }).resumable).toBeUndefined();
+    expect(enrichAllMock).toHaveBeenCalled();
   });
 });
 
