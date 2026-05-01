@@ -112,7 +112,9 @@ app.post('/api/runs', upload.single('csv'), async (req: Request, res: Response):
 // Single-line fields reject every C0 control char and DEL. Multi-line (description) keeps
 // \t \n \r and rejects the rest — null bytes from a malicious client never reach the CSV
 // writer, downstream Attio strings, or our own logs.
+// eslint-disable-next-line no-control-regex
 const SINGLE_LINE_CONTROL_RE = /[\x00-\x1F\x7F]/;
+// eslint-disable-next-line no-control-regex
 const MULTI_LINE_CONTROL_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 
 type ManualFieldRule = {

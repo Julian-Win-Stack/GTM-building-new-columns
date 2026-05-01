@@ -2,7 +2,7 @@ import { PATHS, EXA_RETRY_TRIES, EXA_RETRY_BASE_MS, THEIRSTACK_RETRY_TRIES, THEI
 import { readInputCsv } from '../csv.js';
 import { digitalNativeExaSearch, observabilityToolExaSearch, cloudToolExaSearch, fundingGrowthExaSearch, revenueGrowthExaSearch, numberOfUsersExaSearch, aiAdoptionMindsetExaSearch, aiSreMaturityExaSearch, industryExaSearch, type ExaSearchResponse } from '../apis/exa.js';
 import { collectJobUrls, theirstackJobsByTechnology, theirstackJobsByAnySlugs } from '../apis/theirstack.js';
-import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify, scheduleTwitterApi } from '../rateLimit.js';
+import { scheduleExa, scheduleTheirstack, scheduleApollo, scheduleApify } from '../rateLimit.js';
 import { deriveDomain, linkedInSlugForAttio, normalizeLinkedInUrl } from '../util.js';
 import type { EnrichmentResult, InputRow } from '../types.js';
 import type { StageCompany, StageResult } from '../stages/types.js';

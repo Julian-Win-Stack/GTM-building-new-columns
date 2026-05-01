@@ -361,7 +361,7 @@ describe('POST /api/runs/manual — website domain extraction (lenient by design
 
 describe('POST /api/runs/manual — whitespace and Unicode', () => {
   it('trims surrounding whitespace before writing to CSV', async () => {
-    const { status, json } = await postManual({
+    const { status } = await postManual({
       ...validBody,
       companyName: '  Acme  ',
     });
@@ -372,7 +372,7 @@ describe('POST /api/runs/manual — whitespace and Unicode', () => {
   });
 
   it('preserves emoji in companyName and description', async () => {
-    const { status, json } = await postManual({
+    const { status } = await postManual({
       ...validBody,
       companyName: 'Acme 🚀',
       description: 'Built with ❤️ by us',
@@ -384,7 +384,7 @@ describe('POST /api/runs/manual — whitespace and Unicode', () => {
   });
 
   it('preserves CJK characters', async () => {
-    const { status, json } = await postManual({
+    const { status } = await postManual({
       ...validBody,
       companyName: '北京字节跳动',
     });
@@ -394,7 +394,7 @@ describe('POST /api/runs/manual — whitespace and Unicode', () => {
   });
 
   it('properly quotes a companyName containing a comma', async () => {
-    const { status, json } = await postManual({
+    const { status } = await postManual({
       ...validBody,
       companyName: 'Acme, Inc.',
     });
@@ -404,7 +404,7 @@ describe('POST /api/runs/manual — whitespace and Unicode', () => {
   });
 
   it('properly escapes a description containing double quotes', async () => {
-    const { status, json } = await postManual({
+    const { status } = await postManual({
       ...validBody,
       description: 'They said "ship it" loudly.',
     });
@@ -416,7 +416,7 @@ describe('POST /api/runs/manual — whitespace and Unicode', () => {
 
 describe('POST /api/runs/manual — CSV materialization', () => {
   it('writes a 5-column CSV with the exact header and values', async () => {
-    const { status, json } = await postManual({
+    const { status } = await postManual({
       companyName: 'Acme',
       website: 'acme.com',
       linkedinUrl: 'https://www.linkedin.com/company/acme',

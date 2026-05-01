@@ -15,6 +15,7 @@
 - bottleneck — QPS rate limiter; p-limit — concurrency limiter
 - dotenv — env loading
 - vitest — unit tests
+- eslint (flat config) + typescript-eslint + eslint-plugin-react/-hooks/-refresh — lint
 - express + multer — HTTP server + multipart CSV upload (web UI)
 - react + vite + @tanstack/react-table — frontend single-page app
 - 1-second polling (no extra lib) — frontend `GET /api/runs/:id/state` keeps the UI in sync with the pipeline (replaced SSE for better resilience on flaky networks / corporate proxies / Railway)
@@ -173,6 +174,8 @@ Dev:
 ```
 npm run typecheck                       # tsc --noEmit on src/ + server/
 cd web && npx tsc --noEmit              # frontend typecheck
+npm run lint                            # eslint . — flat config covers src/, server/, web/src/
+npm run lint:fix                        # auto-fixable issues
 npm test                                # vitest
 ```
 
