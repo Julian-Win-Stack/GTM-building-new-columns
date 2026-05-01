@@ -243,7 +243,7 @@ reason: <brief justification>
 
 Reasoning: <2–4 sentences covering product nature, reliability sensitivity, industry, scale, and business model>
 ```
-Score: 0–5 in 0.5 increments. Per-company (batchSize: 1). Uses `AZURE_DEPLOYMENT_PRO` (`gpt-5.4-pro`, hardcoded in `src/apis/openai.ts`).
+Score: 0–5 in 0.5 increments. Per-company (batchSize: 1). Uses `AZURE_DEPLOYMENT` (`gpt-5.4`, hardcoded in `src/apis/openai.ts`).
 
 **Hash-gating:** sha256 hash of all 17 prior enrichable column values stored in the **Company Context Score Change Detection for Developer** column (slug `company_context_change_detection_column_for_developer`). Re-scores only when hash differs or is missing. Durable across machines (stored in Attio). Adding a new upstream enrichable column automatically invalidates all hashes → full re-score on next run.
 
@@ -292,7 +292,7 @@ Tier: Tier <1|2|3|4|5>
 Reasoning:
 <2–4 sentences>
 ```
-Formula (local): `round1(0.5 × Intent + 0.3 × Context + 0.2 × Tooling)`. Two-step rounding prevents float drift. Tiers: ≥4.5→T1, ≥3.5→T2, ≥2.5→T3, ≥1.5→T4, else T5. Hard override: Context=0 → Final Score=0, Tier 5 (no OpenAI call). OpenAI called only for reasoning paragraph using `AZURE_DEPLOYMENT_DEFAULT` (`gpt-5.4`, non-pro). Hash-gated via `final_score_change_detection_for_developer` — covers 3 upstream score cells.
+Formula (local): `round1(0.5 × Intent + 0.3 × Context + 0.2 × Tooling)`. Two-step rounding prevents float drift. Tiers: ≥4.5→T1, ≥3.5→T2, ≥2.5→T3, ≥1.5→T4, else T5. Hard override: Context=0 → Final Score=0, Tier 5 (no OpenAI call). OpenAI called only for reasoning paragraph using `AZURE_DEPLOYMENT` (`gpt-5.4`). Hash-gated via `final_score_change_detection_for_developer` — covers 3 upstream score cells.
 
 ---
 
@@ -322,7 +322,7 @@ All structured Exa stages (Digital Native, Cloud Tool, Funding Growth, Revenue G
 | 15 | AI adoption mindset | Exa per-company, text outputSchema |
 | 16 | AI SRE maturity | Exa per-company, text outputSchema |
 | 17 | Industry | Exa (batch-of-2), structured JSON enum |
-| 18 | Company Context Score | Azure OpenAI gpt-5.4-pro, hash-gated |
-| 19 | Tooling Match Score | Azure OpenAI gpt-5.4-pro, hash-gated |
-| 20 | Intent Signal Score | Azure OpenAI gpt-5.4-pro, hash-gated |
+| 18 | Company Context Score | Azure OpenAI gpt-5.4, hash-gated |
+| 19 | Tooling Match Score | Azure OpenAI gpt-5.4, hash-gated |
+| 20 | Intent Signal Score | Azure OpenAI gpt-5.4, hash-gated |
 | 21 | Final Score | local formula + Azure OpenAI gpt-5.4 (reasoning only), hash-gated |

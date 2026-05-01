@@ -52,4 +52,4 @@ If Apify returns `statusMessage === 'rate limited'` (LinkedIn hourly cap), `runH
 | `STATUSPAGE_RETRY_TRIES` | 3 | |
 | `STATUSPAGE_RETRY_BASE_MS` | 1000 | |
 
-Azure OpenAI deployment names are hardcoded in `src/apis/openai.ts` (`AZURE_DEPLOYMENT_DEFAULT` and `AZURE_DEPLOYMENT_PRO`), not env-driven. Stages 18/19/20 use Pro; Stage 21 uses Default.
+Azure OpenAI deployment name is hardcoded in `src/apis/openai.ts` as `AZURE_DEPLOYMENT` (single deployment for all scoring stages), not env-driven.

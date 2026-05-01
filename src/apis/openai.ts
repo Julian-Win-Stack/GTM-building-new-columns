@@ -9,10 +9,9 @@ export const openai = new OpenAI({
   defaultHeaders: { 'api-key': KEYS.azureOpenAIKey },
 });
 
-// Hardcoded Azure deployment names. Single source of truth so dev and Railway
-// can never drift. Update both deployments in Azure first, then change here.
-export const AZURE_DEPLOYMENT_DEFAULT = 'gpt-5.4';
-export const AZURE_DEPLOYMENT_PRO = 'gpt-5.4-pro';
+// Hardcoded Azure deployment name. Single source of truth so dev and Railway
+// can never drift. Update the deployment in Azure first, then change here.
+export const AZURE_DEPLOYMENT = 'gpt-5.4';
 
 export type JudgeArgs = {
   system: string;
@@ -22,7 +21,7 @@ export type JudgeArgs = {
 };
 
 export async function judge<T = Record<string, unknown>>(args: JudgeArgs): Promise<T> {
-  const { system, user, model = AZURE_DEPLOYMENT_DEFAULT, schema } = args;
+  const { system, user, model = AZURE_DEPLOYMENT, schema } = args;
   const responseFormat = schema
     ? ({ type: 'json_schema', json_schema: schema } as const)
     : ({ type: 'json_object' } as const);

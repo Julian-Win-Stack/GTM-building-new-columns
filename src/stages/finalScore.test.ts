@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../apis/openai.js', () => ({
   judge: vi.fn(),
-  AZURE_DEPLOYMENT_DEFAULT: 'gpt-5.4',
-  AZURE_DEPLOYMENT_PRO: 'gpt-5.4-pro',
+  AZURE_DEPLOYMENT: 'gpt-5.4',
 }));
 vi.mock('../rateLimit.js', () => ({
   openaiLimit: (fn: () => unknown) => fn(),

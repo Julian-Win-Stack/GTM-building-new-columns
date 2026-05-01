@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { FIELD_SLUGS } from '../apis/attio.js';
-import { judge, AZURE_DEPLOYMENT_PRO } from '../apis/openai.js';
+import { judge, AZURE_DEPLOYMENT } from '../apis/openai.js';
 import { openaiLimit } from '../rateLimit.js';
 import { withRetry } from '../util.js';
 import type { StageCompany } from './types.js';
@@ -103,7 +103,7 @@ export async function scoreCompanyContext(
         system: SYSTEM_PROMPT,
         user,
         schema: SCORE_SCHEMA,
-        model: AZURE_DEPLOYMENT_PRO,
+        model: AZURE_DEPLOYMENT,
       }),
       { tries: 3, baseMs: 1000, label: `contextScore:${company.domain}` },
     )
