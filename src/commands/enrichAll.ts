@@ -1061,7 +1061,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   const stage18Todo = stage18Eligible.filter((c) => {
     const values = attioCache.get(c.domain) ?? {};
     const currentHash = computeInputHash(values, enrichableSlugsForHash);
-    return values[hashSlug] !== currentHash;
+    return !values[stage18Slug] || values[hashSlug] !== currentHash;
   });
 
   console.log(`[contextScore] eligible=${stage18Eligible.length} todo=${stage18Todo.length} hash-skipped=${stage18Eligible.length - stage18Todo.length}`);
@@ -1139,7 +1139,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   const stage19Todo = stage19Eligible.filter((c) => {
     const values = attioCache.get(c.domain) ?? {};
     const currentHash = computeInputHash(values, toolingInputSlugs);
-    return values[stage19HashSlug] !== currentHash;
+    return !values[stage19Slug] || values[stage19HashSlug] !== currentHash;
   });
 
   console.log(`[toolingMatchScore] eligible=${stage19Eligible.length} todo=${stage19Todo.length} hash-skipped=${stage19Eligible.length - stage19Todo.length}`);
@@ -1217,7 +1217,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   const stage20Todo = stage20Eligible.filter((c) => {
     const values = attioCache.get(c.domain) ?? {};
     const currentHash = computeInputHash(values, intentInputSlugs);
-    return values[stage20HashSlug] !== currentHash;
+    return !values[stage20Slug] || values[stage20HashSlug] !== currentHash;
   });
 
   console.log(`[intentSignalScore] eligible=${stage20Eligible.length} todo=${stage20Todo.length} hash-skipped=${stage20Eligible.length - stage20Todo.length}`);
@@ -1296,7 +1296,7 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   const stage21Todo = stage21Eligible.filter((c) => {
     const values = attioCache.get(c.domain) ?? {};
     const currentHash = computeInputHash(values, finalInputSlugs);
-    return values[stage21HashSlug] !== currentHash;
+    return !values[stage21Slug] || values[stage21HashSlug] !== currentHash;
   });
 
   console.log(`[finalScore] eligible=${stage21Eligible.length} todo=${stage21Todo.length} hash-skipped=${stage21Eligible.length - stage21Todo.length}`);
