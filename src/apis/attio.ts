@@ -62,18 +62,21 @@ function toAttioValues(data: Partial<EnrichmentResult>): Record<string, unknown>
   return values;
 }
 
-type RawAttioField = Array<{ value?: string; domain_name?: string }>;
+type RawAttioField = Array<{ value?: string; domain_name?: string; domain?: string }>;
 type RawAttioRecord = { id: { record_id: string } | string; values: Record<string, RawAttioField> };
 
 function extractDomain(rec: RawAttioRecord): string {
   const arr = rec.values?.[DOMAIN_SLUG];
-  return arr?.[0]?.domain_name ?? arr?.[0]?.value ?? '';
+  // Attio's Domain multi-value attribute returns entries as { domain: 'foo.com' } on read,
+  // matching the shape we send on write. Older shapes (`domain_name`, `value`) are kept as
+  // fallbacks so the prefetch still works against any legacy or alternate response shape.
+  return arr?.[0]?.domain ?? arr?.[0]?.domain_name ?? arr?.[0]?.value ?? '';
 }
 
 function extractValues(rec: RawAttioRecord): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [slug, arr] of Object.entries(rec.values ?? {})) {
-    const val = arr?.[0]?.value ?? arr?.[0]?.domain_name ?? '';
+    const val = arr?.[0]?.value ?? arr?.[0]?.domain_name ?? arr?.[0]?.domain ?? '';
     if (val) out[slug] = val;
   }
   return out;
