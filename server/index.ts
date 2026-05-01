@@ -92,16 +92,23 @@ function startRunAsync(opts: {
         resumeCache,
         onCacheReady: (live) => attachLiveCache(runId, live),
       });
+      // enrichAll returns gracefully on cancel (via bailIfCancelled) instead of throwing —
+      // so we have to check cancelRequested here, otherwise we'd delete the snapshot the user
+      // needs to resume from.
+      const cancelled = isRunCancelled(runId);
       completeRun(runId, cache);
-      // Successful completion → snapshot is no longer needed. Also drop the source snapshot
-      // we resumed from (its work is now folded into this run).
-      await deleteSnapshot(runId);
-      if (resumeFromSnapshotId && resumeFromSnapshotId !== runId) {
-        await deleteSnapshot(resumeFromSnapshotId);
+      if (!cancelled) {
+        await deleteSnapshot(runId);
+        if (resumeFromSnapshotId && resumeFromSnapshotId !== runId) {
+          await deleteSnapshot(resumeFromSnapshotId);
+        }
+      } else {
+        console.log(`[run ${runId}] cancelled by user — snapshot kept for resume`);
       }
     } catch (err) {
-      // The cancelSignal rejects with `Error('run cancelled')`. When that surfaces here,
-      // treat it as a normal cancelled completion, not a hard failure.
+      // Defensive: enrichAll's bail path normally returns rather than throws on cancel, but if
+      // an in-flight Promise.race surfaces the cancel error past the bail check, treat it as a
+      // normal cancellation, not a hard failure.
       if (isRunCancelled(runId)) {
         console.log(`[run ${runId}] cancelled by user`);
         completeRun(runId, new Map());
