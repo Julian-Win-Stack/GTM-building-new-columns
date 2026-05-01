@@ -27,28 +27,24 @@ export async function writeStageColumn<T>(
           return;
         }
         const value = format(result.data);
-        if (ctx.writeToAttio) {
-          try {
-            const upsert = upsertCompanyByDomain({
-              'Company Name': result.company.companyName,
-              'Domain': result.company.domain,
-              [column]: value,
-            });
-            await (ctx.cancelSignal ? Promise.race([upsert, ctx.cancelSignal]) : upsert);
-            written++;
-          } catch (err) {
-            if (ctx.isCancelled?.()) {
-              cancelled++;
-              return;
-            }
-            failed++;
-            const msg = err instanceof Error ? err.message : String(err);
-            console.error(
-              `[writeStageColumn] Attio write failed for ${result.company.domain} column="${column}": ${msg}`
-            );
-          }
-        } else {
+        try {
+          const upsert = upsertCompanyByDomain({
+            'Company Name': result.company.companyName,
+            'Domain': result.company.domain,
+            [column]: value,
+          });
+          await (ctx.cancelSignal ? Promise.race([upsert, ctx.cancelSignal]) : upsert);
           written++;
+        } catch (err) {
+          if (ctx.isCancelled?.()) {
+            cancelled++;
+            return;
+          }
+          failed++;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(
+            `[writeStageColumn] Attio write failed for ${result.company.domain} column="${column}": ${msg}`
+          );
         }
         ctx.emit({ type: 'cell-updated', domain: result.company.domain, column, value });
       })
@@ -56,6 +52,6 @@ export async function writeStageColumn<T>(
   );
 
   console.log(
-    `[writeStageColumn] column="${column}" written=${written} skipped=${skipped} failed=${failed}${cancelled ? ` cancelled=${cancelled}` : ''}${ctx.writeToAttio ? '' : ' (CSV-only mode)'}`
+    `[writeStageColumn] column="${column}" written=${written} skipped=${skipped} failed=${failed}${cancelled ? ` cancelled=${cancelled}` : ''}`
   );
 }

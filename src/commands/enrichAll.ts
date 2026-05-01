@@ -81,9 +81,6 @@ export type EnrichAllOptions = {
   // Internal: tests set this to skip the 3-second pre-run countdown so the suite stays fast.
   // Not exposed as a CLI flag; the wrapper script and src/index.ts never set it.
   skipConfirm?: boolean;
-  // When false, all Attio reads/writes are skipped — the run produces an in-memory result only.
-  // Defaults to true to preserve the existing CLI behavior.
-  writeToAttio?: boolean;
   // Optional callback fired at every stage boundary and cell update. Used by the web UI to stream
   // a live view of the run; the CLI leaves this undefined (no events emitted).
   onEvent?: (event: RunEvent) => void;
@@ -93,13 +90,6 @@ export type EnrichAllOptions = {
   // in-flight HTTP requests stop blocking the pipeline immediately on cancel — the run bails
   // out and returns the partial attioCache (still downloadable as CSV).
   cancelSignal?: Promise<never>;
-  // Optional pre-seeded cache, used when resuming a previous (crashed) CSV-only run. When set,
-  // the pipeline skips the Attio prefetch and seeds attioCache from this map. The existing
-  // splitByCache logic then naturally skips stages whose cells are already populated.
-  resumeCache?: Map<string, Record<string, string>>;
-  // Optional callback to expose the live in-memory attioCache to the caller before the
-  // pipeline starts. The web server uses this to wire the cache into the snapshot flusher.
-  onCacheReady?: (cache: Map<string, Record<string, string>>) => void;
 };
 
 function splitByCache(
@@ -137,7 +127,7 @@ async function attioUpsertWithCancel(
   ctx: RunCtx,
   data: Partial<EnrichmentResult>
 ): Promise<void> {
-  if (!ctx.writeToAttio || ctx.isCancelled?.()) return;
+  if (ctx.isCancelled?.()) return;
   const writePromise = attioWriteLimit(() => upsertCompanyByDomain(data));
   try {
     await (ctx.cancelSignal ? Promise.race([writePromise, ctx.cancelSignal]) : writePromise);
@@ -149,9 +139,7 @@ async function attioUpsertWithCancel(
 
 export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Record<string, string>>> {
   const csvPath = opts.csv ?? PATHS.defaultInputCsv;
-  const writeToAttio = opts.writeToAttio ?? true;
   const ctx: RunCtx = {
-    writeToAttio,
     emit: opts.onEvent ?? (() => {}),
     isCancelled: opts.isCancelled,
     cancelSignal: opts.cancelSignal,
@@ -225,7 +213,6 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
   console.log(`[enrich] CSV: ${csvPath}`);
   console.log(`[enrich] Account purpose: ${opts.accountPurpose ? `"${opts.accountPurpose}"` : '(none — Account Purpose column will not be touched)'}`);
   console.log(`[enrich] Limit: ${opts.limit ? `${opts.limit} ${opts.limit === 1 ? 'row' : 'rows'}` : 'none (process all rows)'}`);
-  console.log(`[enrich] Mode: ${writeToAttio ? 'Attio write enabled' : 'CSV-only (no Attio writes)'}`);
   console.log();
   console.log(`[preflight] Scanned ${subset.length} ${subset.length === 1 ? 'row' : 'rows'} in CSV.`);
   if (skippedRows.length === 0 && missingApolloIdRows.length === 0) {
@@ -256,38 +243,23 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     console.log();
   }
 
+  // Scope: only the input CSV's domains. Attio records for companies NOT in this CSV are
+  // intentionally ignored — we do not enrich, write to, or even read them. This matches the
+  // user-facing rule: "the program focuses on the input companies, not the whole Attio table".
   let attioCache: Map<string, Record<string, string>>;
-  if (opts.resumeCache && opts.resumeCache.size > 0) {
-    // Resuming a previous CSV-only run from a disk snapshot. Clone the map so callers don't
-    // accidentally mutate it from outside the pipeline.
-    attioCache = new Map<string, Record<string, string>>();
-    for (const [domain, values] of opts.resumeCache) {
-      attioCache.set(domain, { ...values });
+  const csvDomainsForPrefetch = companies.map((c) => c.domain);
+  console.log(`[enrich-all] pre-fetching Attio records for ${csvDomainsForPrefetch.length} CSV domains…`);
+  try {
+    const prefetch = fetchAllRecords(csvDomainsForPrefetch);
+    attioCache = await (ctx.cancelSignal ? Promise.race([prefetch, ctx.cancelSignal]) : prefetch);
+    console.log(`[enrich-all] attio cache loaded (${attioCache.size} records matched out of ${csvDomainsForPrefetch.length} CSV domains)`);
+  } catch (err) {
+    if (ctx.isCancelled?.()) {
+      console.log(`[enrich-all] prefetch aborted (cancelled)`);
+      return new Map<string, Record<string, string>>();
     }
-    console.log(`[enrich-all] resumed from snapshot (${attioCache.size} cached records)`);
-  } else if (writeToAttio) {
-    // Scope: only the input CSV's domains. Attio records for companies NOT in this CSV are
-    // intentionally ignored — we do not enrich, write to, or even read them. This matches the
-    // user-facing rule: "the program focuses on the input companies, not the whole Attio table".
-    const csvDomainsForPrefetch = companies.map((c) => c.domain);
-    console.log(`[enrich-all] pre-fetching Attio records for ${csvDomainsForPrefetch.length} CSV domains…`);
-    try {
-      const prefetch = fetchAllRecords(csvDomainsForPrefetch);
-      attioCache = await (ctx.cancelSignal ? Promise.race([prefetch, ctx.cancelSignal]) : prefetch);
-      console.log(`[enrich-all] attio cache loaded (${attioCache.size} records matched out of ${csvDomainsForPrefetch.length} CSV domains)`);
-    } catch (err) {
-      if (ctx.isCancelled?.()) {
-        console.log(`[enrich-all] prefetch aborted (cancelled)`);
-        return new Map<string, Record<string, string>>();
-      }
-      throw err;
-    }
-  } else {
-    attioCache = new Map<string, Record<string, string>>();
-    console.log(`[enrich-all] CSV-only mode — skipping Attio prefetch`);
+    throw err;
   }
-  // Hand the live cache reference to the caller so an external flusher can snapshot it mid-run.
-  opts.onCacheReady?.(attioCache);
 
   const nameSlug = FIELD_SLUGS['Company Name']!;
   const linkedinSlug = FIELD_SLUGS['LinkedIn Page']!;
@@ -322,27 +294,25 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     return { id, toWrite };
   });
 
-  // Identity-write to Attio (Attio mode only). Uses the pre-seed cache state so we don't
-  // overwrite values that already exist in Attio.
-  if (writeToAttio) {
-    const writeable = identityPlans.filter(({ toWrite }) => Object.keys(toWrite).length > 0);
-    if (writeable.length > 0) {
-      console.log(`[enrich-all] writing identity columns for ${writeable.length} companies…`);
-      await Promise.all(
-        writeable.map(({ id, toWrite }) =>
-          attioWriteLimit(async () => {
+  // Identity-write to Attio. Uses the pre-seed cache state so we don't overwrite values
+  // that already exist in Attio.
+  const writeable = identityPlans.filter(({ toWrite }) => Object.keys(toWrite).length > 0);
+  if (writeable.length > 0) {
+    console.log(`[enrich-all] writing identity columns for ${writeable.length} companies…`);
+    await Promise.all(
+      writeable.map(({ id, toWrite }) =>
+        attioWriteLimit(async () => {
+          if (ctx.isCancelled?.()) return;
+          const upsert = upsertCompanyByDomain({ 'Domain': id.domain, ...toWrite });
+          try {
+            await (ctx.cancelSignal ? Promise.race([upsert, ctx.cancelSignal]) : upsert);
+          } catch (err) {
             if (ctx.isCancelled?.()) return;
-            const upsert = upsertCompanyByDomain({ 'Domain': id.domain, ...toWrite });
-            try {
-              await (ctx.cancelSignal ? Promise.race([upsert, ctx.cancelSignal]) : upsert);
-            } catch (err) {
-              if (ctx.isCancelled?.()) return;
-              console.error(`[identity-preflight] failed for ${id.domain}: ${err instanceof Error ? err.message : String(err)}`);
-            }
-          })
-        )
-      );
-    }
+            console.error(`[identity-preflight] failed for ${id.domain}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        })
+      )
+    );
   }
 
   // Now seed the in-memory cache with identity values so the live UI + the CSV output have
@@ -380,10 +350,9 @@ export async function enrichAll(opts: EnrichAllOptions): Promise<Map<string, Rec
     })),
   });
 
-  // Rehydrate the live UI with everything already in attioCache. Applies to both Attio-mode
-  // resumes (cache pre-populated by fetchAllRecords) and CSV-only snapshot resumes
-  // (cache pre-populated by opts.resumeCache). Each non-empty cell becomes a cell-updated
-  // event so the LiveTable renders the full state of the resumed run from frame one.
+  // Rehydrate the live UI with everything already in attioCache (pre-populated by
+  // fetchAllRecords). Each non-empty cell becomes a cell-updated event so the activity
+  // feed renders the full state from frame one.
   const slugToColumn = new Map<string, string>();
   for (const [column, slug] of Object.entries(FIELD_SLUGS)) {
     if (slug) slugToColumn.set(slug, column);

@@ -12,6 +12,6 @@
     "healthcheckTimeout": 30
   },
   "_notes": {
-    "volume": "Mount a 1 GB persistent volume at /data in the Railway dashboard, then set SNAPSHOT_DIR=/data/runs and UPLOAD_DIR=/data/uploads in the service env vars so crash recovery works across redeploys."
+    "volume": "Mount a persistent volume at /data in the Railway dashboard, then set UPLOAD_DIR=/data/uploads so uploaded CSVs survive redeploys."
   }
 }

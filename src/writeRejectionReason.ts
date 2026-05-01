@@ -12,19 +12,17 @@ export async function writeRejectionReasons(
     rejected.map(({ company, reason }) =>
       attioWriteLimit(async () => {
         if (ctx.isCancelled?.()) return;
-        if (ctx.writeToAttio) {
-          try {
-            const upsert = upsertCompanyByDomain({
-              'Company Name': company.companyName,
-              'Domain': company.domain,
-              'Reason for Rejection': reason,
-            });
-            await (ctx.cancelSignal ? Promise.race([upsert, ctx.cancelSignal]) : upsert);
-          } catch (err) {
-            if (ctx.isCancelled?.()) return;
-            const msg = err instanceof Error ? err.message : String(err);
-            console.error(`[rejection-reason] failed for ${company.domain}: ${msg}`);
-          }
+        try {
+          const upsert = upsertCompanyByDomain({
+            'Company Name': company.companyName,
+            'Domain': company.domain,
+            'Reason for Rejection': reason,
+          });
+          await (ctx.cancelSignal ? Promise.race([upsert, ctx.cancelSignal]) : upsert);
+        } catch (err) {
+          if (ctx.isCancelled?.()) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[rejection-reason] failed for ${company.domain}: ${msg}`);
         }
         ctx.emit({ type: 'cell-updated', domain: company.domain, column: 'Reason for Rejection', value: reason });
         ctx.emit({ type: 'company-rejected', domain: company.domain, reason });

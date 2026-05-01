@@ -16,20 +16,11 @@ export type SubmitArgs =
 
 type Props = {
   disabled: boolean;
-  // Locks the writeToAttio toggle. Kept separate from `disabled` so the toggle stays
-  // interactive while the resume banner is showing — the user can switch modes before
-  // picking Resume or Start fresh.
-  toggleLocked: boolean;
-  writeToAttio: boolean;
-  onWriteToAttioChange: (next: boolean) => void;
   onSubmit: (args: SubmitArgs) => Promise<void> | void;
 };
 
 export function ControlDeck({
   disabled,
-  toggleLocked,
-  writeToAttio,
-  onWriteToAttioChange,
   onSubmit,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -176,31 +167,9 @@ export function ControlDeck({
             <span className="ctrl__hint">Tags every CSV row with this label in the output.</span>
           </label>
 
-          <label className="ctrl__field ctrl__field--toggle">
-            <span className="ctrl__label">Push results to Attio</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={writeToAttio}
-              className={`toggle ${writeToAttio ? 'toggle--on' : ''}`}
-              onClick={() => onWriteToAttioChange(!writeToAttio)}
-              disabled={toggleLocked}
-            >
-              <span className="toggle__track" />
-              <span className="toggle__thumb" />
-            </button>
-            <span className="ctrl__hint">
-              {writeToAttio
-                ? 'Each enriched cell upserts into Attio in real time. Already populated columns are skipped, so previously enriched companies pick up where they left off.'
-                : 'CSV-only run. Nothing is written to Attio.'}
-            </span>
-            {!writeToAttio && (
-              <span className="ctrl__hint ctrl__hint--reassure">
-                <span className="ctrl__hint-mark" aria-hidden>◆</span>
-                Only interrupted runs are saved. If you cancel or the server restarts, re-upload the same CSV within 7 days to resume — successful runs aren't stored.
-              </span>
-            )}
-          </label>
+          <span className="ctrl__hint">
+            Each enriched cell upserts into Attio in real time. Already populated columns are skipped, so previously enriched companies pick up where they left off.
+          </span>
         </div>
       ) : (
         <div className="ctrl__manual">
@@ -282,25 +251,9 @@ export function ControlDeck({
               />
             </label>
 
-            <label className="ctrl__field manual__field ctrl__field--toggle">
-              <span className="ctrl__label">Push results to Attio</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={writeToAttio}
-                className={`toggle ${writeToAttio ? 'toggle--on' : ''}`}
-                onClick={() => onWriteToAttioChange(!writeToAttio)}
-                disabled={toggleLocked}
-              >
-                <span className="toggle__track" />
-                <span className="toggle__thumb" />
-              </button>
-              <span className="ctrl__hint">
-                {writeToAttio
-                  ? 'The enriched company upserts into Attio in real time. Columns already populated on the matching Attio record are skipped, so a re-run only fills in what is missing.'
-                  : 'In-app only. Nothing is written to Attio.'}
-              </span>
-            </label>
+            <span className="ctrl__hint">
+              Each enriched cell upserts into Attio in real time. Already populated columns are skipped, so previously enriched companies pick up where they left off.
+            </span>
           </div>
 
           <div className="notice notice--apollo" role="note">

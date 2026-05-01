@@ -10,7 +10,7 @@ vi.mock('./apis/attio.js', () => ({
 
 const { writeStageColumn } = await import('./writeStageColumn.js');
 
-const ctx: RunCtx = { writeToAttio: true, emit: () => {} };
+const ctx: RunCtx = { emit: () => {} };
 
 beforeEach(() => {
   upsertMock.mockReset().mockResolvedValue({ id: 'rec_1', values: {} });

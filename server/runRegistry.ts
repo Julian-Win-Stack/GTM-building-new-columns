@@ -10,22 +10,15 @@ export type RunRecord = {
   createdAt: number;
   finishedAt?: number;
   cache?: Map<string, Record<string, string>>;
-  // Live cache reference, set by the server right after enrichAll starts so the flusher can
-  // snapshot the cache mid-run. Replaced on `completeRun`.
-  liveCache?: Map<string, Record<string, string>>;
   error?: string;
   cancelRequested: boolean;
   // Promise that *only ever rejects* — racing API calls against it makes them throw on cancel.
   cancelSignal: Promise<never>;
   // Captured reject() of cancelSignal. Called once on /cancel to flip the signal.
   triggerCancel: () => void;
-  // Snapshot bookkeeping — flusher writes when dirty=true.
-  dirty: boolean;
   // Public state (everything below is what serializeRun returns).
-  domains: string[];
   companyNames: Map<string, string>;
   accountPurpose?: string;
-  writeToAttio: boolean;
   totalCompanies: number;
   skippedRows: Array<{ name: string; reason: string }>;
   currentStage?: { stageNumber: number; stageName: string; todo: number; skipped: number };
@@ -40,7 +33,7 @@ export type RunRecord = {
 
 const runs = new Map<string, RunRecord>();
 
-export function createRun(id: string, opts: { writeToAttio: boolean; accountPurpose?: string }): RunRecord {
+export function createRun(id: string, opts: { accountPurpose?: string }): RunRecord {
   let triggerCancel: () => void = () => {};
   const cancelSignal = new Promise<never>((_, reject) => {
     triggerCancel = () => reject(new Error('run cancelled'));
@@ -55,11 +48,8 @@ export function createRun(id: string, opts: { writeToAttio: boolean; accountPurp
     cancelRequested: false,
     cancelSignal,
     triggerCancel,
-    dirty: false,
-    domains: [],
     companyNames: new Map(),
     accountPurpose: opts.accountPurpose,
-    writeToAttio: opts.writeToAttio,
     totalCompanies: 0,
     skippedRows: [],
     stagesCompleted: 0,
@@ -68,11 +58,6 @@ export function createRun(id: string, opts: { writeToAttio: boolean; accountPurp
   };
   runs.set(id, record);
   return record;
-}
-
-export function attachLiveCache(id: string, cache: Map<string, Record<string, string>>): void {
-  const run = runs.get(id);
-  if (run) run.liveCache = cache;
 }
 
 export function requestCancel(id: string): boolean {
@@ -113,9 +98,7 @@ export function appendEvent(id: string, event: RunEvent): void {
       run.status = 'running';
       run.totalCompanies = event.totalCompanies;
       run.skippedRows = event.skippedRows;
-      run.domains = event.companies.map((c) => c.domain);
       run.companyNames = new Map(event.companies.map((c) => [c.domain, c.companyName]));
-      run.dirty = true;
       break;
     }
     case 'stage-started': {
@@ -132,7 +115,6 @@ export function appendEvent(id: string, event: RunEvent): void {
       if (!run.completedStageNames.includes(event.stageName)) {
         run.completedStageNames.push(event.stageName);
       }
-      run.dirty = true;
       break;
     }
     case 'cell-updated': {
@@ -149,7 +131,6 @@ export function appendEvent(id: string, event: RunEvent): void {
         run.recentActivity.length = ACTIVITY_BUFFER_SIZE;
       }
       run.lastEventAt = now;
-      run.dirty = true;
       break;
     }
     case 'company-rejected': {
@@ -166,7 +147,6 @@ export function appendEvent(id: string, event: RunEvent): void {
         run.recentActivity.length = ACTIVITY_BUFFER_SIZE;
       }
       run.lastEventAt = now;
-      run.dirty = true;
       break;
     }
     case 'run-completed': {
@@ -189,28 +169,12 @@ export function appendEvent(id: string, event: RunEvent): void {
   }
 }
 
-export function clearDirty(id: string): void {
-  const run = runs.get(id);
-  if (run) run.dirty = false;
-}
-
-export function listDirtyRunningRuns(): RunRecord[] {
-  const out: RunRecord[] = [];
-  for (const run of runs.values()) {
-    if ((run.status === 'running' || run.status === 'starting') && run.dirty && run.liveCache) {
-      out.push(run);
-    }
-  }
-  return out;
-}
-
 export function completeRun(id: string, cache: Map<string, Record<string, string>>): void {
   const run = runs.get(id);
   if (!run) return;
   run.status = run.cancelRequested ? 'cancelled' : 'completed';
   run.finishedAt = Date.now();
   run.cache = cache;
-  run.liveCache = undefined;
 }
 
 export function failRun(id: string, error: string): void {
@@ -219,7 +183,6 @@ export function failRun(id: string, error: string): void {
   run.status = 'failed';
   run.finishedAt = Date.now();
   run.error = error;
-  run.liveCache = undefined;
 }
 
 export function deleteOldRuns(maxAgeMs: number): number {

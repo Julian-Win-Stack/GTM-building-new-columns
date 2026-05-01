@@ -9,7 +9,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 vi.hoisted(() => {
   process.env['NODE_ENV'] = 'test';
   process.env['UPLOAD_DIR'] = '/tmp/cancel-route-test/uploads';
-  process.env['SNAPSHOT_DIR'] = '/tmp/cancel-route-test/runs';
   // Fake secrets so config.ts doesn't throw when enrichAll is imported transitively.
   process.env['ATTIO_API_KEY'] = 'test-attio';
   process.env['EXA_API_KEY'] = 'test-exa';
@@ -43,7 +42,7 @@ afterAll(async () => {
 
 describe('POST /api/runs/:id/cancel — HTTP boundary', () => {
   it('flips cancelRequested, rejects cancelSignal, and exposes status="cancelling" via /state', async () => {
-    const run = createRun('cancel-test-run', { writeToAttio: false });
+    const run = createRun('cancel-test-run', {});
     // Promote out of 'starting' so requestCancel acts on a "running" run, mirroring
     // production where the route is hit after run-started has fired.
     run.status = 'running';
@@ -78,7 +77,7 @@ describe('POST /api/runs/:id/cancel — HTTP boundary', () => {
   });
 
   it('returns 409 when run is already finished', async () => {
-    const run = createRun('finished-run', { writeToAttio: false });
+    const run = createRun('finished-run', {});
     run.status = 'completed';
 
     const resp = await fetch(`${baseUrl}/api/runs/finished-run/cancel`, { method: 'POST' });

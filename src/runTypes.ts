@@ -22,7 +22,6 @@ export type RunEvent =
   | { type: 'run-failed'; error: string };
 
 export type RunCtx = {
-  writeToAttio: boolean;
   emit: (event: RunEvent) => void;
   // Hard cancellation. `isCancelled` is polled between stages and at the start of each batch.
   // `cancelSignal` is a promise that rejects when the user clicks Cancel — pipeline code races
@@ -33,7 +32,6 @@ export type RunCtx = {
 };
 
 export const NOOP_RUN_CTX: RunCtx = {
-  writeToAttio: true,
   emit: () => {},
 };
 

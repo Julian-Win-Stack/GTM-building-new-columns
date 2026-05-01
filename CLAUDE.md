@@ -1,7 +1,7 @@
 # Project
 **Bacca.ai** is an AI SRE startup that sells software to high-scale digital-native platforms. This repo enriches potential customers (from a CSV) via Apify, Exa, TheirStack, twitterapi.io, Statuspage, Apollo, and Azure OpenAI, scoring each company against Bacca's ICP. Two surfaces share the same pipeline:
 - **CLI (`./enrich`)** — the original automation entry point. Always writes results to the Attio custom object (`companies`).
-- **Web UI (`npm run ui`, deployed to Railway)** — a one-page React app for CEO / GTM leads / GTM interns. Upload a CSV *or* enter a single company by hand (no Apollo Account ID on the manual path), optionally toggle Attio sync, watch rows fill in stage by stage, download a CSV.
+- **Web UI (`npm run ui`, deployed to Railway)** — a one-page React app for CEO / GTM leads / GTM interns. Upload a CSV *or* enter a single company by hand (no Apollo Account ID on the manual path), watch rows fill in stage by stage, download a CSV. Always writes to Attio; already-populated columns are skipped.
 
 ## Stack
 - TypeScript (strict, ESNext modules, `tsx` for direct execution at runtime — no compile step on the server)
@@ -34,9 +34,9 @@ src/
   cache.ts               — disk cache helpers
   filterSurvivors.ts     — filterSurvivors (fresh gate) + filterCachedSurvivors (cached gate)
   runStage.ts            — generic stage runner: batching, concurrency, retry
-  writeStageColumn.ts    — write one column to Attio for all successful stage results (gated by ctx.writeToAttio)
+  writeStageColumn.ts    — write one column to Attio for all successful stage results
   rejectionReasons.ts    — reason-string builders per gate stage (fresh + cached variants)
-  writeRejectionReason.ts — crash-safe Attio writer for Reason for Rejection column (gated by ctx.writeToAttio)
+  writeRejectionReason.ts — crash-safe Attio writer for Reason for Rejection column
   apis/
     attio.ts             — Attio REST client: upsertCompanyByDomain, upsertCompanyByLinkedInUrl, find*
     exa.ts               — Exa search; structured JSON outputSchema for most stages; text outputSchema for Stages 15+16
@@ -79,9 +79,8 @@ cache/                     — disk cache for API responses
 tmp/                       — uploaded CSVs from the web UI (gitignored, ephemeral)
 
 server/
-  index.ts                 — Express app: POST /api/runs (multipart upload + resume detection), POST /api/runs/manual (JSON single-company; materializes a one-row CSV with empty Apollo Account Id and reuses the pipeline; no resume detection), POST /api/runs/:id/start, POST /api/runs/:id/resume, GET /api/runs/:id/state (polling snapshot, no-store), POST /api/runs/:id/cancel, GET /api/runs/:id/csv, GET /api/columns, GET /api/health. Hosts the 1s snapshot flusher + 7d snapshot TTL sweep + 5min finished-run sweep. Serves web/dist/ as static files in production.
-  runRegistry.ts           — in-memory Map<runId, { status, totalCompanies, skippedRows, currentStage, stagesCompleted, completedStageNames, recentActivity (12-entry ring), lastEventAt, surviving/rejected/errored, liveCache, dirty, domains, cancelSignal, triggerCancel, … }> + serializeRun(run) → RunStateSnapshot (cancel-aware status mapping)
-  snapshotStore.ts         — disk-backed crash-recovery snapshots (writeSnapshot/loadSnapshot/findResumableSnapshot/sweepOldSnapshots). Reads SNAPSHOT_DIR env var
+  index.ts                 — Express app: POST /api/runs (multipart upload), POST /api/runs/manual (JSON single-company; materializes a one-row CSV with empty Apollo Account Id and reuses the pipeline), GET /api/runs/:id/state (polling snapshot, no-store), POST /api/runs/:id/cancel, GET /api/runs/:id/csv, GET /api/columns, GET /api/health. Hosts the 5min finished-run sweep. Serves web/dist/ as static files in production.
+  runRegistry.ts           — in-memory Map<runId, { status, totalCompanies, skippedRows, currentStage, stagesCompleted, completedStageNames, recentActivity (12-entry ring), lastEventAt, surviving/rejected/errored, cancelSignal, triggerCancel, … }> + serializeRun(run) → RunStateSnapshot (cancel-aware status mapping)
   csvOutput.ts             — renderCsv(attioCache) → string in CSV_COLUMN_ORDER
   columns.ts               — CSV_COLUMN_ORDER, CSV_COLUMNS (display+slug), STAGE_COLUMNS, IDENTITY_COLUMNS, DEVELOPER_COLUMNS
 
@@ -90,10 +89,9 @@ web/
   src/
     main.tsx, App.tsx, App.css   — single-page shell
     components/
-      ControlDeck.{tsx,css}      — Mode toggle (CSV upload / Single company) + per-mode field set + Account Purpose + "Push to Attio" toggle + Start button. Manual mode shows a warning that the in-house Outreach Automation tool needs an Apollo Account ID and will skip manually-entered companies.
+      ControlDeck.{tsx,css}      — Mode toggle (CSV upload / Single company) + per-mode field set + Account Purpose + Start button. Manual mode shows a warning that the in-house Outreach Automation tool needs an Apollo Account ID and will skip manually-entered companies.
       RunStatus.{tsx,css}        — stage indicator + progress bar + Download CSV button + Cancel button
       SkippedPanel.{tsx,css}     — collapsible list of CSV rows skipped at preflight (no website)
-      ResumeBanner.{tsx,css}     — shown when the uploaded CSV matches a saved snapshot; offers Resume vs Start fresh
       ActivityFeed.{tsx,css}     — rolling feed of recent cell-update / rejection events + heartbeat indicator (proves the run is alive). Replaced the old LiveTable.
     lib/
       runTypes.ts                — frontend mirror of src/runTypes.ts (ActivityEntry + RunStateSnapshot — only the polling-consumed parts)
@@ -162,7 +160,7 @@ CLI (always writes to Attio):
 npm run enrich-all -- --csv <path> [--limit N] [--account-purpose "..."]
 ```
 
-Web UI (Attio sync optional, controlled by the in-app toggle):
+Web UI (always writes to Attio):
 ```
 npm run ui                              # dev: Vite (5173) + Express (3001) concurrently; open http://localhost:5173
 npm run server:dev                      # server alone (tsx watch)
@@ -179,21 +177,12 @@ npm test                                # vitest
 ```
 
 ## Web UI ↔ pipeline contract
-- The UI's POST /api/runs takes a multipart CSV plus `accountPurpose` (string, optional) and `writeToAttio` (boolean, defaults to `false` from the UI). The server saves the CSV to `UPLOAD_DIR/<uuid>` (persistent volume on Railway), then either:
-  - **No resumable snapshot found** → returns `{ runId }` and kicks off `enrichAll` immediately.
-  - **Resumable snapshot found** → returns `{ runId, resumable: { snapshotId, stagesCompleted, … } }` *without* starting the run. The client then calls POST `/api/runs/:id/resume` (with the snapshotId) or POST `/api/runs/:id/start` (fresh). Both kick off `enrichAll` with the same params, the former passing `resumeCache` populated from the snapshot.
-  - **Snapshot resume is bypassed when `writeToAttio` is true.** Attio-sync runs always start immediately and rely on the pipeline's Attio prefetch to skip rows whose target columns are already populated (matches CLI semantics).
-- POST /api/runs/manual takes JSON `{ companyName, website, linkedinUrl, description?, accountPurpose?, writeToAttio }`. Required fields are companyName/website/linkedinUrl; description is optional but recommended for scoring accuracy. The server materializes a one-row CSV (with `Apollo Account Id` empty) at `UPLOAD_DIR/manual-<uuid>.csv` and reuses `startRunAsync` — same pipeline, same events, same download. Resume detection mirrors the CSV path: the derived domain (set-equality on `{derivedDomain}`) is matched against saved snapshots; a hit returns `{ runId, resumable }` and waits for `/resume` or `/start`. Same `writeToAttio=true` bypass applies.
-- `enrichAll` accepts a `RunCtx { writeToAttio, emit, isCancelled, cancelSignal }`. Every Attio write site (`writeStageColumn`, `writeRejectionReasons`, score-stage `upsertCompanyByDomain` calls, identity-write block, the upfront `fetchAllRecords` prefetch) checks `ctx.writeToAttio` before hitting the network. The prefetch is also narrowed to the CSV's domains so Attio records outside the CSV never enter the cache. Cache mutations and event emits happen regardless. Cancel races every API await against `cancelSignal` so in-flight HTTP calls stop blocking the pipeline.
-- After cache initialization (Attio prefetch / `resumeCache` / empty), `enrichAll` walks `attioCache` and emits a `cell-updated` event for every non-empty cell so the activity feed fully rehydrates from frame one — applies to both Attio resumes and snapshot resumes.
+- POST /api/runs takes a multipart CSV plus `accountPurpose` (string, optional). The server saves the CSV to `UPLOAD_DIR/<uuid>`, returns `{ runId }`, and kicks off `enrichAll` immediately. Every run always writes to Attio.
+- POST /api/runs/manual takes JSON `{ companyName, website, linkedinUrl, description?, accountPurpose? }`. Required fields are companyName/website/linkedinUrl; description is optional but recommended for scoring accuracy. The server materializes a one-row CSV (with `Apollo Account Id` empty) at `UPLOAD_DIR/manual-<uuid>.csv` and reuses `startRunAsync` — same pipeline, same events, same download.
+- `enrichAll` accepts a `RunCtx { emit, isCancelled, cancelSignal }`. The pipeline always prefetches existing Attio records for the CSV's domains, so columns already populated in Attio are skipped (resume semantics). The prefetch is narrowed to the CSV's domains so Attio records outside the CSV never enter the cache. Cancel races every API await against `cancelSignal` so in-flight HTTP calls stop blocking the pipeline.
+- After Attio prefetch, `enrichAll` walks `attioCache` and emits a `cell-updated` event for every non-empty cell so the activity feed fully rehydrates from frame one.
 - Pipeline events are consumed server-side: each `RunEvent` updates the run's `RunRecord` (current stage, ring buffer of recent activity, terminal counts). The frontend polls `GET /api/runs/:id/state` every second; the server returns a `RunStateSnapshot` with `Cache-Control: no-store`. The polling hook stops on terminal status (`completed` / `cancelled` / `failed`).
 - The downloadable CSV (`GET /api/runs/:id/csv`) is served from the in-memory `attioCache`, ordered by `CSV_COLUMN_ORDER` (see `server/columns.ts`).
-
-## Crash recovery (snapshot store)
-- A 1-second background flusher writes the live `attioCache` of every running run to `SNAPSHOT_DIR/<runId>.json` whenever the run's dirty flag is set (`server/snapshotStore.ts` + `server/index.ts`).
-- On the next CSV upload, the server matches the CSV's domain set against every saved snapshot. A match → resume banner in the UI. No match → fresh run.
-- Snapshot lifecycle: deleted on successful run-completed; kept on cancel/failure/crash; daily TTL sweep removes anything older than 7 days.
-- For Railway: mount a 1 GB persistent volume at `/data` and set `SNAPSHOT_DIR=/data/runs` and `UPLOAD_DIR=/data/uploads` so snapshots and uploads survive redeploys. Locally, both default to `tmp/runs/` and `tmp/uploads/`.
 
 ## Deployment (Railway)
 - One container: Express on `process.env.PORT` serves `web/dist/` AND `/api/*`.
@@ -201,10 +190,7 @@ npm test                                # vitest
 - Start: `npm start` (tsx server/index.ts).
 - Health: `/api/health`.
 - All existing pipeline env vars must be set in Railway (ATTIO_API_KEY, EXA_API_KEY, …). The `cache/` directory is ephemeral (perf cache only).
-- **Persistent volume required for crash-proof CSV-only runs.** Mount a 1 GB volume at `/data` in the Railway dashboard, then set:
-  - `SNAPSHOT_DIR=/data/runs` — disk-backed snapshots, ~1 MB per run
-  - `UPLOAD_DIR=/data/uploads` — uploaded CSVs (so a redeploy mid-run can still find the source)
-  - Without the volume, snapshots and uploads are wiped on every redeploy. The pipeline still works, just no resume across redeploys.
+- **Persistent volume (optional):** mount at `/data` and set `UPLOAD_DIR=/data/uploads` so uploaded CSVs survive redeploys. Without it, uploads are wiped on every redeploy — the pipeline still works, but a mid-run redeploy loses the source CSV.
 
 ## Code Style
 - Strict TypeScript: `strict: true`, `noUncheckedIndexedAccess: true`
@@ -214,7 +200,7 @@ npm test                                # vitest
 - All env values read through `KEYS` in `config.ts` (server reads `process.env.PORT` and `NODE_ENV` directly — those are server-runtime, not pipeline config)
 - Enrichers: `(input: EnricherInput) => Promise<string>` — return `''` if unavailable
 - All outbound API calls must use their scheduler wrapper: `scheduleExa()`, `scheduleTheirstack()`, `scheduleApollo()`, `scheduleApify()`, `scheduleTwitterApi()`, `scheduleStatuspage()` — never call the underlying client directly
-- Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`) AND respect `ctx.writeToAttio` from the active RunCtx
+- Attio upserts must go through `attioWriteLimit` (handled by `writeStageColumn`)
 - Azure OpenAI deployment for Stages 18/19/20 lives in `KEYS.azureOpenAIDeploymentPro` — never hardcode deployment names in stage files
 - TheirStack response parsing must check both `technology_slugs` and `technology_names` against machine-readable slug strings — both fields return slugs, never human-readable display names
 - No comments unless the WHY is non-obvious

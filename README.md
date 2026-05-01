@@ -3,7 +3,7 @@
 Bacca.ai's GTM enrichment pipeline. Two surfaces share the same pipeline:
 
 - **CLI (`./enrich`)** — for the operator running batch jobs from a CSV. Always writes results to Attio.
-- **Web UI (`npm run ui`, deployed to Railway)** — for GTM team. Upload a CSV, watch rows fill in stage by stage, download the result. Attio sync is optional via an in-app toggle.
+- **Web UI (`npm run ui`, deployed to Railway)** — for GTM team. Upload a CSV or enter a single company, watch rows fill in stage by stage, download the result. Always writes to Attio; already-populated columns are skipped.
 
 Both call Apify, Exa, TheirStack, Azure OpenAI, Apollo, twitterapi.io, and Statuspage; both run the same 21-stage scoring pipeline; both write results to the Attio custom object `companies`.
 
@@ -33,7 +33,7 @@ npm install
 npm run ui                  # Vite (5173) + Express (3001) running concurrently
 ```
 
-Then open [http://localhost:5173](http://localhost:5173), drop a CSV onto the upload zone, decide whether to push to Attio, and hit Start.
+Then open [http://localhost:5173](http://localhost:5173), drop a CSV onto the upload zone and hit Start.
 
 ---
 
@@ -106,11 +106,10 @@ npm run web:dev                     # frontend alone (Vite on 5173)
 
 The web UI gives non-technical users a forgiving path through the same pipeline:
 
-- **Upload** — drag a CSV onto the upload zone. The server saves it to `UPLOAD_DIR` and assigns a run ID.
+- **Upload** — drag a CSV onto the upload zone (or switch to Single company mode and fill in the fields). The server saves the input and assigns a run ID.
 - **Account Purpose** — a free-text field that tags every CSV-sourced row in Attio.
-- **"Push to Attio" toggle** — defaults **off**. With the toggle off the pipeline still runs, the activity feed still updates, and you can still download the result CSV — but no `PUT /records` calls are made to Attio. Useful for trial runs or when the target object isn't fully set up yet.
+- **Always writes to Attio** — every enriched cell upserts into Attio in real time. Already-populated columns are skipped, so previously enriched companies pick up where they left off.
 - **Activity feed** — a rolling feed of cell-update and rejection events as the pipeline runs. The polling endpoint refreshes state every second and a heartbeat indicator confirms the run is alive.
-- **Resume banner** — if your uploaded CSV's domains match a saved snapshot from a previous (crashed or cancelled) run, the UI offers to resume from where it left off rather than start fresh.
 - **Download CSV** — at any point during or after the run.
 - **Cancel** — stops the run; in-flight API calls race against the cancel signal so the UI doesn't block.
 
@@ -120,11 +119,11 @@ The web UI gives non-technical users a forgiving path through the same pipeline:
 
 ### Input set
 
-The processing set is **always the CSV (or single-company input) only.** With Attio sync on, the pipeline pre-fetches the matching Attio record for each CSV domain so it can skip stages whose target columns are already populated — but Attio records whose domain is *not* in the current CSV are ignored. Re-enriching an old company means re-including it in the CSV.
+The processing set is **always the CSV (or single-company input) only.** The pipeline pre-fetches the matching Attio record for each CSV domain so it can skip stages whose target columns are already populated — but Attio records whose domain is *not* in the current CSV are ignored. Re-enriching an old company means re-including it in the CSV.
 
 ### 21-stage pipeline
 
-Stages run in a fixed order. Each stage writes one column to Attio (if Attio sync is on) and emits a cell-update event to the UI either way.
+Stages run in a fixed order. Each stage writes one column to Attio and emits a cell-update event to the UI.
 
 **Stages 2–6 are gating.** A company that fails a gate (e.g. scored as not digital-native at Stage 2, or found to use Microsoft Teams instead of Slack at Stage 5) receives a `Reason for Rejection` entry and is dropped from all subsequent stages. Stage 1 is not gating — every company continues to Stage 2 regardless.
 
@@ -135,10 +134,6 @@ The full stage table, gate rules, and Exa/TheirStack API mapping are in [`CLAUDE
 ### Resume semantics
 
 Every stage skips a company whose target column is already non-empty. This makes re-runs safe and cheap — crash, fix, re-run, and only the failed companies are retried.
-
-### Snapshot crash recovery
-
-A 1-second background flusher writes the live `attioCache` of every running run to `SNAPSHOT_DIR/<runId>.json`. On the next CSV upload, the server matches the CSV's domain set against every saved snapshot — a match shows the resume banner; no match starts fresh. Snapshots are deleted on successful completion, kept on cancel/failure/crash, and swept after 7 days. On Railway this requires a mounted persistent volume (see [Deployment](#deployment)).
 
 ### Rate limiting and caching
 
@@ -161,7 +156,7 @@ Copy `.env.example` to `.env` and fill in all values. `.env` is gitignored and m
 | Statuspage | `STATUSPAGE_CONCURRENCY`, `STATUSPAGE_RETRY_TRIES`, `STATUSPAGE_RETRY_BASE_MS` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_DEPLOYMENT_PRO`, `OPENAI_CONCURRENCY` |
 | Pipeline | `CONCURRENCY`, `ATTIO_WRITE_CONCURRENCY` |
-| Server (web UI only) | `PORT`, `NODE_ENV`, `UPLOAD_DIR`, `SNAPSHOT_DIR` |
+| Server (web UI only) | `PORT`, `NODE_ENV`, `UPLOAD_DIR` |
 
 The Attio object slug (`companies`) is hardcoded as `ATTIO_OBJECT_SLUG` in `src/apis/attio.ts` — its field slugs in `FIELD_SLUGS` are tightly coupled to that specific object's schema, so it isn't env-configurable. All rate-limit tunables are documented in [`docs/rate-limits.md`](docs/rate-limits.md).
 
@@ -191,9 +186,9 @@ The web UI deploys to Railway as a single container. Express on `process.env.POR
 | Build command | `npm ci && npm run build` (Vite build only — no server compile, runtime uses `tsx`) |
 | Start command | `npm start` |
 | Health check | `/api/health` |
-| Required env vars | All API keys, plus `SNAPSHOT_DIR=/data/runs` and `UPLOAD_DIR=/data/uploads` if a persistent volume is mounted |
+| Required env vars | All API keys, plus `UPLOAD_DIR=/data/uploads` if a persistent volume is mounted |
 
-**Persistent volume.** For crash-proof CSV-only runs, mount a 1 GB volume at `/data` and set `SNAPSHOT_DIR=/data/runs` and `UPLOAD_DIR=/data/uploads`. Without the volume the pipeline still works but snapshots and uploads are wiped on every redeploy (no cross-redeploy resume). The `cache/` directory is ephemeral perf cache only — losing it never affects correctness.
+**Persistent volume (optional).** Mount at `/data` and set `UPLOAD_DIR=/data/uploads` so uploaded CSVs survive redeploys. Without it, uploads are wiped on every redeploy — the pipeline still works, but a mid-run redeploy loses the source CSV. The `cache/` directory is ephemeral perf cache only — losing it never affects correctness.
 
 `railway.json` in the repo root carries the nixpacks config and start/health settings.
 
@@ -221,13 +216,7 @@ The row is missing `Website` or `Company Linkedin Url` (or both — both are req
 **Field slugs in Attio must match exactly.** The script identifies each Attio column by a machine-readable slug (defined in `src/apis/attio.ts:FIELD_SLUGS`). If the slug doesn't match a field on the `companies` object in your Attio workspace, Attio silently ignores it — no error, the write just disappears.
 
 **Web UI: `companies` columns are empty after the run.**
-Likely "Push to Attio" is on but the Attio object is missing some columns from `FIELD_SLUGS` — those writes silently drop. Cross-check every entry in `FIELD_SLUGS` against the attributes on the target object.
-
-**Web UI: resume banner appears for an unrelated CSV.**
-A previous snapshot has the same domain set as the new upload. Click "Start fresh" to discard the old snapshot and start clean.
-
-**Web UI: a crashed run is not resumable after a Railway redeploy.**
-The persistent volume isn't mounted, or `SNAPSHOT_DIR` / `UPLOAD_DIR` aren't pointing at it. Verify the volume exists at `/data` in the Railway dashboard and the env vars are set to `/data/runs` and `/data/uploads`.
+The Attio object is likely missing some columns from `FIELD_SLUGS` — those writes silently drop. Cross-check every entry in `FIELD_SLUGS` against the attributes on the target object.
 
 **Exa, TheirStack, or Apollo 429 (rate limit).**
 Lower the relevant `*_QPS` value in `.env`. See [`docs/rate-limits.md`](docs/rate-limits.md) for safe defaults.
