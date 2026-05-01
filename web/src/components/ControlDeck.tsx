@@ -191,7 +191,7 @@ export function ControlDeck({
             </button>
             <span className="ctrl__hint">
               {writeToAttio
-                ? 'Each enriched cell upserts into Attio in real time. Columns already populated on the matching Attio record are skipped, so previously enriched companies pick up where they left off.'
+                ? 'Each enriched cell upserts into Attio in real time. Already populated columns are skipped, so previously enriched companies pick up where they left off.'
                 : 'CSV-only run. Nothing is written to Attio.'}
             </span>
             {!writeToAttio && (
@@ -311,7 +311,7 @@ export function ControlDeck({
                 Companies entered manually do not carry an Apollo Account ID, so the in-house{' '}
                 <strong>Outreach Automation</strong> tool will not pick this account up — that tool
                 requires an Apollo Account ID to push results back into Apollo. Use a CSV import if
-                you need the Outreach Automation hand-off.
+                you need the Outreach Automation.
               </span>
             </div>
           </div>

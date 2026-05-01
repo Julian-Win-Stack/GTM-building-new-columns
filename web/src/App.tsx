@@ -27,7 +27,7 @@ export function App() {
   const [shouldAutoDownload, setShouldAutoDownload] = useState(false);
   // Lifted out of ControlDeck so the toggle stays interactive while the resume banner is up:
   // the user can switch between CSV-only and Attio modes before picking Resume / Start fresh.
-  const [writeToAttio, setWriteToAttio] = useState(false);
+  const [writeToAttio, setWriteToAttio] = useState(true);
 
   const { state, cancel } = useRunStream(runId);
   const isRunning =
